@@ -1,0 +1,400 @@
+StockAI daily pipeline started at 20261029T170405Z
+
+
+=== MARKET DATA UPDATE ===
+COMMAND: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\.venv\Scripts\python.exe -m scripts.update_market_data --delay 0.4
+$INFODRIVE.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['INFODRIVE.BO']: possibly delisted; no timezone found
+$INFODRIVE.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['INFODRIVE.BO']: possibly delisted; no timezone found
+$INFODRIVE.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['INFODRIVE.BO']: possibly delisted; no timezone found
+$MICROPRO.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['MICROPRO.BO']: possibly delisted; no timezone found
+$MICROPRO.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['MICROPRO.BO']: possibly delisted; no timezone found
+$MICROPRO.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['MICROPRO.BO']: possibly delisted; no timezone found
+$NETRIPPLES.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['NETRIPPLES.BO']: possibly delisted; no timezone found
+$NETRIPPLES.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['NETRIPPLES.BO']: possibly delisted; no timezone found
+$NETRIPPLES.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['NETRIPPLES.BO']: possibly delisted; no timezone found
+$SATECH.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['SATECH.BO']: possibly delisted; no timezone found
+$SATECH.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['SATECH.BO']: possibly delisted; no timezone found
+$SATECH.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['SATECH.BO']: possibly delisted; no timezone found
+$TECHD.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['TECHD.BO']: possibly delisted; no timezone found
+$TECHD.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['TECHD.BO']: possibly delisted; no timezone found
+$TECHD.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['TECHD.BO']: possibly delisted; no timezone found
+$VINSYS.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['VINSYS.BO']: possibly delisted; no timezone found
+$VINSYS.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['VINSYS.BO']: possibly delisted; no timezone found
+$VINSYS.BO: possibly delisted; no timezone found
+
+1 Failed download:
+['VINSYS.BO']: possibly delisted; no timezone found
+[1/125] 3IINFOLTD.NS: UPDATED | ADEQUATE | rows=2475
+[2/125] 3IINFOLTD.BO: UPDATED | ADEQUATE | rows=2473
+[3/125] 63MOONS.NS: UPDATED | ADEQUATE | rows=2476
+[4/125] 63MOONS.BO: UPDATED | ADEQUATE | rows=2473
+[5/123] ACESEPP.BO: UPDATED | ADEQUATE | rows=208
+[6/123] ACESOFT.BO: UPDATED | ADEQUATE | rows=2472
+[7/123] AFFLE.NS: UPDATED | ADEQUATE | rows=1786
+[8/123] AFFLE.BO: UPDATED | ADEQUATE | rows=1783
+[9/123] B2BSOFT.BO: UPDATED | ADEQUATE | rows=2475
+[10/123] BSOFT.NS: UPDATED | ADEQUATE | rows=2476
+[11/123] BSOFT.BO: UPDATED | ADEQUATE | rows=2473
+[12/123] BBOX.NS: UPDATED | ADEQUATE | rows=2476
+[13/123] BBOX.BO: UPDATED | ADEQUATE | rows=2472
+[14/122] CALSOFT.BO: UPDATED | ADEQUATE | rows=2473
+[15/122] CALSOFT.NS: UPDATED | ADEQUATE | rows=2475
+[16/122] CGVAK.NS: UPDATED | SHORT_HISTORY | rows=50
+[17/122] CGVAK.BO: UPDATED | ADEQUATE | rows=2473
+[18/122] CIGNITITEC.BO: REFRESHED_NO_NEW_DATES | SHORT_HISTORY | rows=1
+[19/122] COFORGE.NS: UPDATED | ADEQUATE | rows=2476
+[20/122] COFORGE.BO: UPDATED | ADEQUATE | rows=2476
+[21/122] COMPUSOFT.NS: UPDATED | ADEQUATE | rows=2476
+[22/122] COMPUSOFT.BO: UPDATED | ADEQUATE | rows=2473
+[23/122] CRANESSOFT.BO: UPDATED | ADEQUATE | rows=2473
+[24/122] CYBERTECH.BO: UPDATED | ADEQUATE | rows=2472
+[25/122] CYBERTECH.NS: UPDATED | ADEQUATE | rows=2476
+[26/122] CYIENTDLM.NS: UPDATED | ADEQUATE | rows=817
+[27/122] CYIENTDLM.BO: UPDATED | ADEQUATE | rows=814
+[28/122] CYIENT.NS: UPDATED | ADEQUATE | rows=2476
+[29/122] CYIENT.BO: UPDATED | ADEQUATE | rows=2473
+[30/122] DATAMATICS.NS: UPDATED | ADEQUATE | rows=2476
+[31/122] DATAMATICS.BO: UPDATED | ADEQUATE | rows=2473
+[32/122] DEVIT.BO: UPDATED | ADEQUATE | rows=1161
+[33/122] DEVIT.NS: UPDATED | ADEQUATE | rows=2286
+[34/122] E2E.NS: UPDATED | ADEQUATE | rows=2079
+[35/122] E2E.BO: UPDATED | SHORT_HISTORY | rows=96
+[36/122] ECLERX.NS: UPDATED | ADEQUATE | rows=2476
+[37/122] ECLERX.BO: UPDATED | ADEQUATE | rows=2476
+[38/122] EKENNIS.BO: UPDATED | ADEQUATE | rows=1146
+[39/122] ESDS.NS: UPDATED | SHORT_HISTORY | rows=37
+[40/122] ESDS.BO: UPDATED | SHORT_HISTORY | rows=36
+[41/122] FCSSOFT.NS: UPDATED | ADEQUATE | rows=2476
+[42/122] FCSSOFT.BO: UPDATED | SHORT_HISTORY | rows=3
+[43/122] FSL.NS: UPDATED | ADEQUATE | rows=2476
+[44/122] FSL.BO: UPDATED | ADEQUATE | rows=2473
+[45/122] HAPPSTMNDS.BO: UPDATED | ADEQUATE | rows=1510
+[46/122] HAPPSTMNDS.NS: UPDATED | ADEQUATE | rows=1513
+[47/122] HCL-INSYS.NS: UPDATED | ADEQUATE | rows=2476
+[48/122] HCL-INSYS.BO: UPDATED | SHORT_HISTORY | rows=3
+[49/122] HEXT.NS: UPDATED | ADEQUATE | rows=416
+[50/122] HEXT.BO: UPDATED | ADEQUATE | rows=416
+[51/122] HILLTONE.BO: UPDATED | ADEQUATE | rows=453
+[52/122] IDEAFORGE.NS: UPDATED | ADEQUATE | rows=818
+[53/122] IDEAFORGE.BO: UPDATED | ADEQUATE | rows=815
+[54/122] INDINFO.BO: UPDATED | ADEQUATE | rows=2472
+[55/120] INFODRIVE.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[56/120] INFY.NS: UPDATED | ADEQUATE | rows=2476
+[57/120] INFY.BO: UPDATED | SHORT_HISTORY | rows=3
+[58/120] INTELLECT.NS: UPDATED | ADEQUATE | rows=2476
+[59/120] INTELLECT.BO: UPDATED | ADEQUATE | rows=2473
+[60/120] KPITTECH.NS: UPDATED | ADEQUATE | rows=1861
+[61/120] KPITTECH.BO: UPDATED | ADEQUATE | rows=1858
+[62/120] LTTS.BO: UPDATED | ADEQUATE | rows=2473
+[63/120] LTTS.NS: UPDATED | ADEQUATE | rows=2476
+[64/120] LEENEE.BO: UPDATED | ADEQUATE | rows=2472
+[65/120] LEENEE.NS: UPDATED | SHORT_HISTORY | rows=50
+[66/120] MASTEK.NS: UPDATED | ADEQUATE | rows=2476
+[67/120] MASTEK.BO: UPDATED | ADEQUATE | rows=2473
+[68/120] METHODHUB.BO: UPDATED | ADEQUATE | rows=216
+[69/120] MICROPRO.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[70/120] MPHASIS.NS: UPDATED | ADEQUATE | rows=2476
+[71/120] MPHASIS.BO: UPDATED | ADEQUATE | rows=2473
+[72/120] NETRIPPLES.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[73/120] NETWEB.BO: UPDATED | ADEQUATE | rows=801
+[74/120] NETWEB.NS: UPDATED | ADEQUATE | rows=804
+[75/120] NEWGEN.BO: UPDATED | ADEQUATE | rows=2158
+[76/120] NEWGEN.NS: UPDATED | ADEQUATE | rows=2161
+[77/120] NIITLTD.BO: UPDATED | SHORT_HISTORY | rows=3
+[78/120] NUCLEUS.NS: UPDATED | ADEQUATE | rows=2475
+[79/120] NUCLEUS.BO: UPDATED | ADEQUATE | rows=2473
+[80/120] OMNIAX.BO: UPDATED | ADEQUATE | rows=2471
+[81/120] OFSS.NS: UPDATED | ADEQUATE | rows=2476
+[82/120] PERSISTENT.NS: UPDATED | ADEQUATE | rows=2476
+[83/120] PERSISTENT.BO: UPDATED | SHORT_HISTORY | rows=3
+[84/120] QUICKHEAL.BO: UPDATED | ADEQUATE | rows=2473
+[85/120] QUICKHEAL.NS: UPDATED | ADEQUATE | rows=2476
+[86/120] RSYSTEMS.NS: UPDATED | ADEQUATE | rows=2476
+[87/120] RSYSTEMS.BO: UPDATED | SHORT_HISTORY | rows=3
+[88/120] RSSOFTWARE.NS: UPDATED | ADEQUATE | rows=2476
+[89/120] RSSOFTWARE.BO: UPDATED | SHORT_HISTORY | rows=3
+[90/120] ROUTE.NS: UPDATED | ADEQUATE | rows=1511
+[91/120] ROUTE.BO: UPDATED | ADEQUATE | rows=1508
+[92/120] SATECH.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[93/120] SAKSOFT.NS: UPDATED | ADEQUATE | rows=2476
+[94/120] SAKSOFT.BO: UPDATED | SHORT_HISTORY | rows=3
+[95/120] SASKEN.NS: UPDATED | ADEQUATE | rows=2475
+[96/120] SASKEN.BO: UPDATED | ADEQUATE | rows=2473
+[97/120] SONATSOFTW.NS: UPDATED | ADEQUATE | rows=2476
+[98/120] SONATSOFTW.BO: UPDATED | ADEQUATE | rows=2473
+[99/120] STARCOM.BO: UPDATED | ADEQUATE | rows=2471
+[100/120] SVAMSOF.BO: UPDATED | ADEQUATE | rows=2473
+[101/120] SYRMA.NS: UPDATED | ADEQUATE | rows=1031
+[102/120] SYRMA.BO: UPDATED | ADEQUATE | rows=1028
+[103/120] TANLA.NS: UPDATED | ADEQUATE | rows=2476
+[104/120] TANLA.BO: UPDATED | ADEQUATE | rows=2473
+[105/120] TCS.NS: UPDATED | ADEQUATE | rows=2476
+[106/120] TATAELXSI.BO: UPDATED | SHORT_HISTORY | rows=3
+[107/120] TATAELXSI.NS: UPDATED | ADEQUATE | rows=2476
+[108/120] TATATECH.NS: UPDATED | ADEQUATE | rows=720
+[109/120] TATATECH.BO: UPDATED | ADEQUATE | rows=720
+[110/120] TCS.BO: UPDATED | ADEQUATE | rows=2473
+[111/120] TECHM.NS: UPDATED | ADEQUATE | rows=2476
+[112/120] TECHM.BO: UPDATED | SHORT_HISTORY | rows=3
+[113/120] TECHD.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[114/120] TERASOFT.NS: UPDATED | ADEQUATE | rows=2429
+[115/120] TERASOFT.BO: UPDATED | ADEQUATE | rows=2472
+[116/120] VINSYS.BO: NO_PROVIDER_HISTORY | UNAVAILABLE | rows=0
+[117/120] WIPRO.NS: UPDATED | ADEQUATE | rows=2476
+[118/120] WIPRO.BO: UPDATED | ADEQUATE | rows=2474
+[119/120] ZENSARTECH.NS: UPDATED | ADEQUATE | rows=2476
+[120/120] ZENSARTECH.BO: UPDATED | SHORT_HISTORY | rows=3
+
+SUMMARY
+{
+  "timestamp_utc": "2026-10-29T17:05:58.114322+00:00",
+  "master_records_considered": 126,
+  "processed_records": 120,
+  "skipped_rights_entitlements": 6,
+  "updated": 113,
+  "failed": 0,
+  "no_new_data": 0,
+  "adequate_history": 97,
+  "short_history": 17,
+  "unavailable_history": 6,
+  "skipped_rights_details": [
+    {
+      "company_name": "3i Infotech limited",
+      "exchange": "BSE",
+      "ticker": "3IINFO-RE",
+      "reason": "RIGHTS_ENTITLEMENT"
+    },
+    {
+      "company_name": "Ace Software Exports ltd.",
+      "exchange": "BSE",
+      "ticker": "ACES-RE",
+      "reason": "RIGHTS_ENTITLEMENT"
+    },
+    {
+      "company_name": "Ace Software Exports ltd.",
+      "exchange": "BSE",
+      "ticker": "ACES-RE1",
+      "reason": "RIGHTS_ENTITLEMENT"
+    },
+    {
+      "company_name": "California Software Co. Ltd.",
+      "exchange": "BSE",
+      "ticker": "CALSOFT-RE",
+      "reason": "RIGHTS_ENTITLEMENT"
+    },
+    {
+      "company_name": "Indian Infotech And Software L",
+      "exchange": "BSE",
+      "ticker": "INDINF-RE1",
+      "reason": "RIGHTS_ENTITLEMENT"
+    },
+    {
+      "company_name": "Indian Infotech And Software L",
+      "exchange": "BSE",
+      "ticker": "INDINFO-RE",
+      "reason": "RIGHTS_ENTITLEMENT"
+    }
+  ]
+}
+
+EXIT CODE: 0
+
+
+=== BATCH PREDICTIONS ===
+COMMAND: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\.venv\Scripts\python.exe -m scripts.batch_predict --news
+[1/126] 3i Infotech limited: SKIPPED_NON_ORDINARY_SECURITY
+[2/126] 3i Infotech Limited: OK
+[3/126] 3I INFOTECH LTD.: OK
+[4/126] 63 moons technologies limited: OK
+[5/126] 63 Moons Technologies Limited: OK
+[6/126] Ace Software Exports ltd.: SKIPPED_NON_ORDINARY_SECURITY
+[7/126] Ace Software Exports ltd.: SKIPPED_NON_ORDINARY_SECURITY
+[8/126] Ace Software Exports ltd.: INSUFFICIENT_HISTORY
+[9/126] ACE SOFTWARE EXPORTS LTD.: OK
+[10/126] Affle 3i Limited: OK
+[11/126] AFFLE 3I LIMITED: OK
+[12/126] B2B SOFTWARE TECHNOLOGIES LTD.: OK
+[13/126] BIRLASOFT LIMITED: OK
+[14/126] BIRLASOFT LIMITED: OK
+[15/126] Black Box Limited: OK
+[16/126] BLACK BOX LIMITED: OK
+[17/126] California Software Co. Ltd.: SKIPPED_NON_ORDINARY_SECURITY
+[18/126] CALIFORNIA SOFTWARE CO.LTD.: OK
+[19/126] California Software Company Limited: OK
+[20/126] CG Vak Software & Exports Limited: INSUFFICIENT_HISTORY
+[21/126] CG-VAK SOFTWARE & EXPORTS LTD.: OK
+[22/126] CIGNITI TECHNOLOGIES LTD.: INSUFFICIENT_HISTORY
+[23/126] Coforge Limited: OK
+[24/126] COFORGE LIMITED: OK
+[25/126] Compucom Software Limited: OK
+[26/126] COMPUCOM SOFTWARE LTD.: OK
+[27/126] CRANES SOFTWARE INTERNATIONAL: OK
+[28/126] CYBERTECH SYSTEMS AND SOFTWARE: OK
+[29/126] Cybertech Systems And Software Limited: OK
+[30/126] Cyient DLM Limited: OK
+[31/126] Cyient DLM Limited: OK
+[32/126] Cyient Limited: OK
+[33/126] Cyient Limited: OK
+[34/126] Datamatics Global Services Limited: OK
+[35/126] DATAMATICS GLOBAL SERVICES LTD: OK
+[36/126] DEV INFORMATION TECHNOLOGY LIM: OK
+[37/126] Dev Information Technology Limited: OK
+[38/126] E2E Networks Limited: OK
+[39/126] E2E Networks Limited: INSUFFICIENT_HISTORY
+[40/126] eClerx Services Limited: OK
+[41/126] eClerx Services Limited: OK
+[42/126] Ekennis Software Service Limit: OK
+[43/126] ESDS Software Solution Limited: INSUFFICIENT_HISTORY
+[44/126] ESDS Software Solution Limited: INSUFFICIENT_HISTORY
+[45/126] FCS Software Solutions Limited: OK
+[46/126] FCS SOFTWARE SOLUTIONS LTD.: INSUFFICIENT_HISTORY
+[47/126] Firstsource Solutions Limited: OK
+[48/126] Firstsource Solutions Ltd.: OK
+[49/126] Happiest Minds Technologies Li: OK
+[50/126] Happiest Minds Technologies Limited: OK
+[51/126] HCL Infosystems Limited: OK
+[52/126] HCL INFOSYSTEMS LTD.: INSUFFICIENT_HISTORY
+[53/126] Hexaware Technologies Limited: OK
+[54/126] Hexaware Technologies Limited: OK
+[55/126] Hilltone Software and Gases Lt: OK
+[56/126] Ideaforge Technology Limited: OK
+[57/126] IDEAFORGE TECHNOLOGY LIMITED: OK
+[58/126] INDIAN INFOTECH & SOFTWARE LTD: OK
+[59/126] Indian Infotech And Software L: SKIPPED_NON_ORDINARY_SECURITY
+[60/126] Indian Infotech And Software L: SKIPPED_NON_ORDINARY_SECURITY
+[61/126] INFO-DRIVE SOFTWARE LTD.: NO_PRICE_HISTORY
+[62/126] Infosys Limited: OK
+[63/126] Infosys Ltd: INSUFFICIENT_HISTORY
+[64/126] Intellect Design Arena Limited: OK
+[65/126] INTELLECT DESIGN ARENA LIMITED: OK
+[66/126] KPIT Technologies Limited: OK
+[67/126] KPIT Technologies Ltd: OK
+[68/126] L&T Technology Services Limite: OK
+[69/126] L&T Technology Services Limited: OK
+[70/126] LEE & NEE SOFTWARES (EXPORTS): OK
+[71/126] Lee & Nee Softwares Exports Limited: INSUFFICIENT_HISTORY
+[72/126] Mastek Limited: OK
+[73/126] MASTEK LTD.: OK
+[74/126] Methodhub Software Limited: OK
+[75/126] MICROPRO SOFTWARE SOL L: NO_PRICE_HISTORY
+[76/126] MphasiS Limited: OK
+[77/126] Mphasis Limited: OK
+[78/126] Netripples Software Limited: NO_PRICE_HISTORY
+[79/126] Netweb Technologies India Limi: OK
+[80/126] Netweb Technologies India Limited: OK
+[81/126] Newgen Software Technologies L: OK
+[82/126] Newgen Software Technologies Limited: OK
+[83/126] NIIT LTD.: INSUFFICIENT_HISTORY
+[84/126] Nucleus Software Exports Limited: OK
+[85/126] NUCLEUS SOFTWARE EXPORTS LTD.: OK
+[86/126] OMNI AXS SOFTWARE LTD.: OK
+[87/126] Oracle Financial Services Software Limited: OK
+[88/126] Persistent Systems Limited: OK
+[89/126] Persistent Systems Limited: INSUFFICIENT_HISTORY
+[90/126] Quick Heal Technologies Limite: OK
+[91/126] Quick Heal Technologies Limited: OK
+[92/126] R Systems International Limited: OK
+[93/126] R SYSTEMS INTERNATIONAL LTD.: INSUFFICIENT_HISTORY
+[94/126] R. S. Software (India) Limited: OK
+[95/126] R.S.SOFTWARE INDIA LTD.: INSUFFICIENT_HISTORY
+[96/126] ROUTE MOBILE LIMITED: OK
+[97/126] Route Mobile Limited: OK
+[98/126] S A TECH SOFTWARE INDIA L: NO_PRICE_HISTORY
+[99/126] Saksoft Limited: OK
+[100/126] SAKSOFT LTD.: INSUFFICIENT_HISTORY
+[101/126] Sasken Technologies Limited: OK
+[102/126] Sasken Technologies Limited: OK
+[103/126] Sonata Software Limited: OK
+[104/126] Sonata Software Limited: OK
+[105/126] STARCOM INFORMATION TECHNOLOGY: OK
+[106/126] SVAM SOFTWARE LTD.: OK
+[107/126] Syrma SGS Technology Limited: OK
+[108/126] Syrma SGS Technology Limited: OK
+[109/126] Tanla Platforms Limited: OK
+[110/126] TANLA PLATFORMS LIMITED: OK
+[111/126] Tata Consultancy Services Limited: OK
+[112/126] TATA ELXSI: INSUFFICIENT_HISTORY
+[113/126] Tata Elxsi Limited: OK
+[114/126] Tata Technologies Limited: OK
+[115/126] Tata Technologies Limited: OK
+[116/126] TCS LTD.: OK
+[117/126] Tech Mahindra Limited: OK
+[118/126] Tech Mahindra Limited: INSUFFICIENT_HISTORY
+[119/126] TECHD CYBERSECURITY LTD: NO_PRICE_HISTORY
+[120/126] Tera Software Limited: OK
+[121/126] TERA SOFTWARE LTD.: OK
+[122/126] VINSYS IT SERVICES IND LT: NO_PRICE_HISTORY
+[123/126] Wipro Limited: OK
+[124/126] WIPRO LTD.: OK
+[125/126] Zensar Technologies Limited: OK
+[126/126] Zensar Technologies Limited: INSUFFICIENT_HISTORY
+
+STATUS SUMMARY
+status
+OK                               96
+INSUFFICIENT_HISTORY             18
+SKIPPED_NON_ORDINARY_SECURITY     6
+NO_PRICE_HISTORY                  6
+
+Timestamped report: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\data\predictions\predictions_20261029T170820Z.csv
+Latest report:      C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\data\predictions\predictions_latest.csv
+
+EXIT CODE: 0
+
+Finished UTC: 2026-10-29T17:08:21.040297+00:00
+Market updater exit code: 0
+Market records failed: 0
+Prediction script exit code: 0
+Prediction records failed: 0
+Overall result: SUCCESS

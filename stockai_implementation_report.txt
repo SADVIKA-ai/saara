@@ -1,0 +1,1836 @@
+PROJECT FILES AND SOURCE
+
+===== src\config.py =====
+from pathlib import Path
+import os
+ROOT=Path(__file__).resolve().parents[1]
+DATA=Path(os.getenv("STOCKAI_DATA_DIR",str(ROOT/"data")))
+MASTER_CSV=DATA/"master"/"companies_master.csv"
+MASTER_XLSX=ROOT/"data"/"master"/"top_100_india_companies.xlsx"
+RAW=DATA/"raw"; NEWS=DATA/"news"; PRED=DATA/"predictions"; LOGS=ROOT/"outputs"/"logs"
+INITIAL_YEARS=10; MIN_ROWS=120; TEST_FRACTION=0.2
+BUY_THRESHOLD=0.005; SELL_THRESHOLD=-0.005
+for p in (RAW,NEWS,PRED,LOGS): p.mkdir(parents=True,exist_ok=True)
+
+===== src\features.py =====
+
+import numpy as np
+import pandas as pd
+
+
+FEATURES = [
+    "return_1d",
+    "return_5d",
+    "return_10d",
+    "ma_ratio_5",
+    "ma_ratio_20",
+    "ma_ratio_50",
+    "volatility_10",
+    "volatility_20",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "volume_change",
+    "volume_ratio",
+    "range_pct",
+    "body_pct",
+]
+
+
+def features(raw: pd.DataFrame) -> pd.DataFrame:
+    """Build technical features from historical OHLCV market data."""
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+
+    d = raw.copy()
+    d.columns = [str(c).strip().lower() for c in d.columns]
+
+    # Normalize common date-column names.
+    if "date" not in d.columns:
+        if "datetime" in d.columns:
+            d = d.rename(columns={"datetime": "date"})
+        elif "index" in d.columns:
+            d = d.rename(columns={"index": "date"})
+        else:
+            d = d.reset_index()
+            d.columns = [str(c).strip().lower() for c in d.columns]
+            if "date" not in d.columns:
+                if "datetime" in d.columns:
+                    d = d.rename(columns={"datetime": "date"})
+                else:
+                    d = d.rename(columns={d.columns[0]: "date"})
+
+    required = ["date", "open", "high", "low", "close", "volume"]
+    missing = [column for column in required if column not in d.columns]
+    if missing:
+        raise ValueError(
+            f"Market data is missing required columns: {missing}"
+        )
+
+    d["date"] = pd.to_datetime(d["date"], errors="coerce", utc=True)
+    d["date"] = (
+        d["date"]
+        .dt.tz_convert("Asia/Kolkata")
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
+
+    for column in ["open", "high", "low", "close", "volume"]:
+        d[column] = pd.to_numeric(d[column], errors="coerce")
+
+    d = (
+        d.dropna(subset=["date", "open", "high", "low", "close"])
+        .sort_values("date")
+        .drop_duplicates(subset=["date"], keep="last")
+        .reset_index(drop=True)
+    )
+
+    close = d["close"]
+    volume = d["volume"]
+
+    # Price returns.
+    d["return_1d"] = close.pct_change(fill_method=None)
+    d["return_5d"] = close.pct_change(periods=5, fill_method=None)
+    d["return_10d"] = close.pct_change(periods=10, fill_method=None)
+
+    # Moving-average ratios.
+    ma_5 = close.rolling(window=5).mean()
+    ma_20 = close.rolling(window=20).mean()
+    ma_50 = close.rolling(window=50).mean()
+
+    d["ma_ratio_5"] = close / ma_5 - 1
+    d["ma_ratio_20"] = close / ma_20 - 1
+    d["ma_ratio_50"] = close / ma_50 - 1
+
+    # Rolling volatility.
+    d["volatility_10"] = d["return_1d"].rolling(window=10).std()
+    d["volatility_20"] = d["return_1d"].rolling(window=20).std()
+
+    # RSI (14-period).
+    delta = close.diff()
+    gains = delta.clip(lower=0)
+    losses = -delta.clip(upper=0)
+
+    average_gain = gains.rolling(window=14).mean()
+    average_loss = losses.rolling(window=14).mean()
+
+    relative_strength = average_gain / average_loss.replace(0, np.nan)
+    d["rsi_14"] = 100 - (100 / (1 + relative_strength))
+
+    # Handle periods with gains but no losses.
+    d.loc[
+        (average_loss == 0) & (average_gain > 0), "rsi_14"
+    ] = 100
+
+    # MACD (12-period EMA minus 26-period EMA).
+    ema_12 = close.ewm(span=12, adjust=False).mean()
+    ema_26 = close.ewm(span=26, adjust=False).mean()
+
+    d["macd"] = ema_12 - ema_26
+    d["macd_signal"] = d["macd"].ewm(
+        span=9, adjust=False
+    ).mean()
+
+    # Volume features.
+    # Explicitly disable implicit forward filling to avoid the pandas warning.
+    d["volume_change"] = volume.pct_change(fill_method=None)
+    d["volume_ratio"] = volume / volume.rolling(window=20).mean()
+
+    # Daily high-low range and open-close body.
+    d["range_pct"] = (d["high"] - d["low"]) / close
+    d["body_pct"] = (d["close"] - d["open"]) / d["open"].replace(
+        0, np.nan
+    )
+
+    return d
+
+
+def training_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    """Create features and next-observation prediction targets."""
+    d = features(raw)
+
+    if d.empty:
+        return d
+
+    d["target_next_close"] = d["close"].shift(-1)
+    d["target_next_return"] = (
+        d["target_next_close"] / d["close"] - 1
+    )
+
+    required = FEATURES + ["target_next_close", "target_next_return"]
+    d = d.replace([np.inf, -np.inf], np.nan)
+    d = d.dropna(subset=required).reset_index(drop=True)
+
+    return d
+
+===== src\market_data.py =====
+
+from datetime import datetime, timedelta
+import time
+
+import pandas as pd
+import yfinance as yf
+
+from .config import RAW, INITIAL_YEARS, MIN_ROWS
+
+
+def safe(symbol):
+    """Convert a provider symbol into a safe filename."""
+    return "".join(
+        char if char.isalnum() or char in "._-" else "_"
+        for char in str(symbol)
+    )
+
+
+def path(symbol):
+    """Return the raw CSV path for a provider symbol."""
+    return RAW / (safe(symbol) + ".csv")
+
+
+def trading_dates(values):
+    """Normalize timestamps to Indian trading dates."""
+    parsed = pd.to_datetime(
+        values,
+        errors="coerce",
+        format="mixed",
+        utc=True,
+    )
+
+    return (
+        parsed.dt.tz_convert("Asia/Kolkata")
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
+
+
+def read(symbol):
+    """Read existing market history without modifying the source file."""
+    if not symbol:
+        return pd.DataFrame()
+
+    file_path = path(symbol)
+
+    if not file_path.exists():
+        return pd.DataFrame()
+
+    try:
+        data = pd.read_csv(file_path)
+
+        if "Date" not in data.columns:
+            return pd.DataFrame()
+
+        data["Date"] = trading_dates(data["Date"])
+
+        data = (
+            data.dropna(subset=["Date"])
+            .drop_duplicates("Date", keep="last")
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+        return data
+
+    except (
+        OSError,
+        ValueError,
+        pd.errors.ParserError,
+        KeyError,
+    ):
+        return pd.DataFrame()
+
+
+def normalize(data):
+    """Normalize downloaded yfinance data into a consistent table."""
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    data = data.copy()
+
+    # Handle MultiIndex columns returned by some yfinance versions.
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = [
+            next(
+                (
+                    str(part)
+                    for part in column
+                    if str(part) not in ("", "None")
+                ),
+                str(column[0]),
+            )
+            for column in data.columns
+        ]
+
+    data = data.reset_index()
+
+    data.columns = [
+        str(column).strip().replace(" ", "_")
+        for column in data.columns
+    ]
+
+    if "Date" not in data.columns and "Datetime" in data.columns:
+        data = data.rename(columns={"Datetime": "Date"})
+
+    if "Date" not in data.columns:
+        return pd.DataFrame()
+
+    data["Date"] = trading_dates(data["Date"])
+
+    data = (
+        data.dropna(subset=["Date"])
+        .drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    return data
+
+
+def history_quality(row_count):
+    """Classify history coverage; this is not a forecast-quality score."""
+    if row_count <= 0:
+        return "UNAVAILABLE"
+
+    if row_count < MIN_ROWS:
+        return "SHORT_HISTORY"
+
+    return "ADEQUATE"
+
+
+def update(symbol, retries=3, force_backfill=False):
+    """
+    Update a symbol's historical data.
+
+    Default behavior:
+      - Missing file: request the configured historical backfill.
+      - Existing file: request overlapping recent dates and merge.
+      - force_backfill=True: explicitly request the configured backfill.
+
+    Existing history is preserved when the provider returns no data.
+    """
+
+    if not symbol:
+        return {
+            "symbol": symbol,
+            "status": "NO_SYMBOL",
+            "mode": "NONE",
+            "previous_rows": 0,
+            "rows": 0,
+            "latest_date": "",
+            "history_quality": "UNAVAILABLE",
+            "error": "No provider symbol",
+        }
+
+    old = read(symbol)
+    previous_rows = len(old)
+
+    now = datetime.now()
+    today = now.date()
+
+    needs_backfill = old.empty or force_backfill
+
+    if needs_backfill:
+        start = (
+            now - timedelta(days=365.25 * INITIAL_YEARS)
+        ).date()
+        mode = "BACKFILL"
+    else:
+        last_date = old["Date"].max()
+        start = (last_date - pd.Timedelta(days=5)).date()
+        mode = "INCREMENTAL"
+
+    end = (today + timedelta(days=1)).isoformat()
+
+    errors = []
+    fresh = pd.DataFrame()
+
+    attempts = max(1, int(retries))
+
+    for attempt in range(attempts):
+        try:
+            downloaded = yf.download(
+                symbol,
+                start=start.isoformat(),
+                end=end,
+                auto_adjust=False,
+                actions=True,
+                progress=False,
+                threads=False,
+                timeout=30,
+            )
+
+            fresh = normalize(downloaded)
+
+            if not fresh.empty:
+                break
+
+            errors.append("Provider returned no rows")
+
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+        if attempt + 1 < attempts:
+            time.sleep(attempt + 1)
+
+    # Do not overwrite existing data when the download is empty.
+    if fresh.empty:
+        latest = (
+            str(old["Date"].max().date())
+            if not old.empty
+            else ""
+        )
+
+        only_empty_responses = (
+            bool(errors)
+            and all(
+                error == "Provider returned no rows"
+                for error in errors
+            )
+        )
+
+        if not old.empty:
+            status = "NO_NEW_DATA"
+        elif only_empty_responses:
+            status = "NO_PROVIDER_HISTORY"
+        else:
+            status = "FAILED"
+
+        return {
+            "symbol": symbol,
+            "status": status,
+            "mode": mode,
+            "previous_rows": previous_rows,
+            "rows": previous_rows,
+            "latest_date": latest,
+            "history_quality": history_quality(previous_rows),
+            "error": "; ".join(errors),
+        }
+
+    # Merge old and new data without discarding older dates.
+    combined = pd.concat(
+        [old, fresh],
+        ignore_index=True,
+        sort=False,
+    )
+
+    combined["Date"] = trading_dates(combined["Date"])
+
+    combined = combined.dropna(subset=["Date"])
+
+    # Combine overlapping dates, keeping the last non-null value
+    # from the ordered records.
+    combined = (
+        combined.sort_values("Date")
+        .groupby("Date", as_index=False, sort=True)
+        .last()
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    # Restore old values when the provider's overlapping rows have
+    # missing fields. Do not replace fresh non-null values with old ones.
+    if not old.empty:
+        old_by_date = (
+            old.drop_duplicates("Date", keep="last")
+            .set_index("Date")
+        )
+
+        merged_by_date = combined.set_index("Date")
+        merged_by_date = merged_by_date.combine_first(old_by_date)
+
+        combined = (
+            merged_by_date.reset_index()
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+    combined = (
+        combined.drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    # Validate the history before writing anything.
+    if combined.empty:
+        raise ValueError(
+            f"Refusing to save empty history for {symbol}"
+        )
+
+    if combined["Date"].isna().any():
+        raise ValueError(
+            f"Refusing to save invalid dates for {symbol}"
+        )
+
+    if combined["Date"].duplicated().any():
+        raise ValueError(
+            f"Refusing to save duplicate dates for {symbol}"
+        )
+
+    if not combined["Date"].is_monotonic_increasing:
+        raise ValueError(
+            f"Refusing to save unsorted dates for {symbol}"
+        )
+
+    # Validate downloaded price columns when they are available.
+    if "Close" in combined.columns:
+        close = pd.to_numeric(
+            combined["Close"],
+            errors="coerce",
+        )
+
+        invalid_close = close.notna() & (close <= 0)
+
+        if invalid_close.any():
+            raise ValueError(
+                f"Refusing to save non-positive closing prices for {symbol}"
+            )
+
+    destination = path(symbol)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary = destination.with_name(
+        destination.name + ".tmp"
+    )
+
+    try:
+        combined.to_csv(temporary, index=False)
+
+        # Re-read the temporary file before replacing the destination.
+        check = pd.read_csv(temporary)
+
+        if "Date" not in check.columns:
+            raise ValueError("Temporary CSV is missing Date")
+
+        if len(check) != len(combined):
+            raise ValueError("Temporary CSV row-count validation failed")
+
+        check_dates = trading_dates(check["Date"])
+
+        if check_dates.isna().any():
+            raise ValueError("Temporary CSV contains invalid dates")
+
+        if check_dates.duplicated().any():
+            raise ValueError("Temporary CSV contains duplicate dates")
+
+        # Replace the destination only after validation succeeds.
+        temporary.replace(destination)
+
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+
+        raise
+
+    row_count = len(combined)
+    latest = str(combined["Date"].max().date())
+
+    # Distinguish new dates from a successful overlapping refresh.
+    old_dates = set(old["Date"]) if not old.empty else set()
+    fresh_dates = set(fresh["Date"])
+    added_dates = len(fresh_dates - old_dates)
+
+    if old.empty:
+        status = "UPDATED"
+    elif added_dates > 0:
+        status = "UPDATED"
+    else:
+        status = "REFRESHED_NO_NEW_DATES"
+
+    return {
+        "symbol": symbol,
+        "status": status,
+        "mode": mode,
+        "previous_rows": previous_rows,
+        "rows": row_count,
+        "new_dates": added_dates,
+        "latest_date": latest,
+        "history_quality": history_quality(row_count),
+        "error": "",
+    }
+
+
+def history(symbol, refresh=False):
+    """Return sorted historical data, optionally refreshing it first."""
+    if refresh:
+        update(symbol)
+
+    data = read(symbol)
+
+    if data.empty:
+        return data
+
+    return (
+        data.dropna(subset=["Date"])
+        .drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+===== src\predict.py =====
+
+from datetime import datetime, timezone
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+from .features import FEATURES, training_frame, features
+from .config import (
+    MIN_ROWS,
+    TEST_FRACTION,
+    BUY_THRESHOLD,
+    SELL_THRESHOLD,
+)
+
+
+MODEL_NAME = "HistGradientBoostingRegressor"
+FEATURE_SCHEMA_VERSION = "stockai-features-v1"
+
+
+def decision(expected_return):
+    """Convert a decimal expected return into a configured signal."""
+    if expected_return >= BUY_THRESHOLD:
+        return "BUY"
+    if expected_return <= SELL_THRESHOLD:
+        return "SELL"
+    return "HOLD"
+
+
+def history_metadata(raw):
+    """Report observed history coverage."""
+    empty = {
+        "raw_history_rows": 0,
+        "history_start_date": "",
+        "raw_history_latest_date": "",
+    }
+
+    if raw is None or raw.empty:
+        return empty
+
+    date_column = next(
+        (
+            c for c in ("Date", "Datetime", "date", "datetime")
+            if c in raw.columns
+        ),
+        None,
+    )
+
+    if date_column is None:
+        return {**empty, "raw_history_rows": len(raw)}
+
+    dates = pd.to_datetime(
+        raw[date_column], errors="coerce", utc=True
+    ).dropna()
+
+    if dates.empty:
+        return {**empty, "raw_history_rows": len(raw)}
+
+    dates = (
+        dates.dt.tz_convert("Asia/Kolkata")
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
+
+    return {
+        "raw_history_rows": len(raw),
+        "history_start_date": str(dates.min().date()),
+        "raw_history_latest_date": str(dates.max().date()),
+    }
+
+
+def _make_model():
+    """Build a fresh model pipeline."""
+    return Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        (
+            "model",
+            HistGradientBoostingRegressor(
+                max_iter=160,
+                learning_rate=0.06,
+                max_leaf_nodes=15,
+                l2_regularization=1.0,
+                random_state=42,
+            ),
+        ),
+    ])
+
+
+def _price_metrics(actual, predicted):
+    """Calculate errors in price units and relative to mean actual price."""
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    mae = float(mean_absolute_error(actual, predicted))
+    rmse = float(np.sqrt(mean_squared_error(actual, predicted)))
+    mean_actual = float(np.mean(actual))
+
+    return {
+        "mae": mae,
+        "rmse": rmse,
+        "mae_pct_of_mean_actual": (
+            mae / abs(mean_actual) * 100
+            if np.isfinite(mean_actual) and mean_actual != 0
+            else None
+        ),
+    }
+
+
+def _directional_accuracy(actual_returns, predicted_returns):
+    """Percentage of correct up/down calls, excluding flat actual returns."""
+    actual_returns = np.asarray(actual_returns, dtype=float)
+    predicted_returns = np.asarray(predicted_returns, dtype=float)
+
+    valid = (
+        np.isfinite(actual_returns)
+        & np.isfinite(predicted_returns)
+        & (actual_returns != 0)
+    )
+
+    if not np.any(valid):
+        return None
+
+    return float(
+        np.mean(
+            np.sign(actual_returns[valid])
+            == np.sign(predicted_returns[valid])
+        ) * 100
+    )
+
+
+def predict(raw, sentiment_score=0.0):
+    """
+    Predict the next usable observation's close from predicted return.
+
+    This function does not generate one-month or multi-year targets.
+    """
+    metadata = history_metadata(raw)
+
+    if raw is None or raw.empty:
+        return {
+            "status": "NO_PRICE_HISTORY",
+            "message": "No historical market data is available.",
+            **metadata,
+        }
+
+    f = training_frame(raw)
+
+    if f.empty:
+        return {
+            "status": "INSUFFICIENT_HISTORY",
+            "message": "No usable feature and target rows are available.",
+            "training_rows": 0,
+            **metadata,
+        }
+
+    X = f[FEATURES].replace([np.inf, -np.inf], np.nan)
+    y = pd.to_numeric(f["target_next_return"], errors="coerce")
+    current_close = pd.to_numeric(f["close"], errors="coerce")
+    target_close = pd.to_numeric(f["target_next_close"], errors="coerce")
+
+    valid = (
+        y.notna()
+        & current_close.notna()
+        & target_close.notna()
+        & np.isfinite(y)
+        & np.isfinite(current_close)
+        & np.isfinite(target_close)
+        & (current_close > 0)
+        & (target_close > 0)
+    )
+
+    X = X.loc[valid].reset_index(drop=True)
+    y = y.loc[valid].reset_index(drop=True)
+    current_close = current_close.loc[valid].reset_index(drop=True)
+    target_close = target_close.loc[valid].reset_index(drop=True)
+
+    if len(X) < MIN_ROWS:
+        return {
+            "status": "INSUFFICIENT_HISTORY",
+            "message": (
+                f"Need at least {MIN_ROWS} usable training rows; "
+                f"got {len(X)}."
+            ),
+            "training_rows": len(X),
+            "minimum_training_rows": MIN_ROWS,
+            **metadata,
+        }
+
+    split = int(len(X) * (1 - TEST_FRACTION))
+    split = max(split, MIN_ROWS)
+
+    if split >= len(X):
+        split = len(X) - 1
+
+    if split < 60 or len(X) - split < 1:
+        return {
+            "status": "INSUFFICIENT_HISTORY",
+            "message": "Not enough observations for chronological validation.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+    model = _make_model()
+    model.fit(X_train, y_train)
+
+    test_returns = model.predict(X_test)
+
+    if not np.isfinite(test_returns).all():
+        return {
+            "status": "INVALID_FORECAST",
+            "message": "Validation produced invalid return predictions.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    test_current_close = current_close.iloc[split:].to_numpy(dtype=float)
+    test_actual_close = target_close.iloc[split:].to_numpy(dtype=float)
+
+    # Convert each predicted return into a predicted closing price.
+    test_predicted_close = test_current_close * (1 + test_returns)
+
+    # Naive baseline: next close equals the current close.
+    baseline_predicted_close = test_current_close.copy()
+
+    model_metrics = _price_metrics(
+        test_actual_close, test_predicted_close
+    )
+    baseline_metrics = _price_metrics(
+        test_actual_close, baseline_predicted_close
+    )
+
+    actual_returns = y_test.to_numpy(dtype=float)
+
+    directional_accuracy = _directional_accuracy(
+        actual_returns, test_returns
+    )
+
+    # Refit on all labelled observations for the latest estimate.
+    model.fit(X, y)
+
+    latest_features = features(raw)
+    if latest_features.empty:
+        return {
+            "status": "INSUFFICIENT_FEATURES",
+            "message": "No technical features could be calculated.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    latest_features = latest_features.replace(
+        [np.inf, -np.inf], np.nan
+    )
+    latest_features = latest_features.dropna(
+        subset=FEATURES + ["close", "date"]
+    )
+
+    if latest_features.empty:
+        return {
+            "status": "INSUFFICIENT_FEATURES",
+            "message": "The latest row lacks required features.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    latest = latest_features.iloc[-1]
+    actual = float(latest["close"])
+
+    if not np.isfinite(actual) or actual <= 0:
+        return {
+            "status": "INVALID_LATEST_CLOSE",
+            "message": "Latest close is missing or non-positive.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    model_return = float(
+        model.predict(latest_features[FEATURES].iloc[[-1]])[0]
+    )
+
+    if not np.isfinite(model_return):
+        return {
+            "status": "INVALID_FORECAST",
+            "message": "The model returned an invalid predicted return.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    forecast = actual * (1 + model_return)
+
+    if not np.isfinite(forecast) or forecast <= 0:
+        return {
+            "status": "INVALID_FORECAST",
+            "message": (
+                "Predicted return implies a non-positive or invalid price."
+            ),
+            "predicted_return": model_return,
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    try:
+        score = float(sentiment_score)
+    except (TypeError, ValueError):
+        score = 0.0
+
+    if not np.isfinite(score):
+        score = 0.0
+
+    adjusted_return = model_return + 0.0025 * score
+
+    market_date = pd.to_datetime(latest["date"], errors="coerce")
+    if pd.isna(market_date):
+        return {
+            "status": "INVALID_MARKET_DATE",
+            "message": "Latest feature row has an invalid date.",
+            "training_rows": len(X),
+            **metadata,
+        }
+
+    return {
+        "status": "OK",
+        "latest_actual_close": actual,
+        "latest_market_date": str(market_date.date()),
+        "predicted_next_close": forecast,
+        "predicted_change": forecast - actual,
+        "model_expected_return_pct": model_return * 100,
+        "sentiment_score": score,
+        "sentiment_adjusted_return_pct": adjusted_return * 100,
+        "decision": decision(adjusted_return),
+
+        "mae_holdout": model_metrics["mae"],
+        "rmse_holdout": model_metrics["rmse"],
+        "mae_holdout_pct_of_mean_actual": (
+            model_metrics["mae_pct_of_mean_actual"]
+        ),
+        "directional_accuracy_pct": directional_accuracy,
+
+        "baseline_name": "LAST_CLOSE",
+        "baseline_mae_holdout": baseline_metrics["mae"],
+        "baseline_rmse_holdout": baseline_metrics["rmse"],
+        "baseline_mae_pct_of_mean_actual": (
+            baseline_metrics["mae_pct_of_mean_actual"]
+        ),
+        "model_beats_baseline_mae": (
+            model_metrics["mae"] < baseline_metrics["mae"]
+        ),
+        "model_beats_baseline_rmse": (
+            model_metrics["rmse"] < baseline_metrics["rmse"]
+        ),
+
+        "holdout_rows": len(X_test),
+        "training_rows": len(X),
+        "model": MODEL_NAME,
+        "forecast_horizon": "NEXT_OBSERVATION",
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "prediction_timestamp_utc": datetime.now(
+            timezone.utc
+        ).isoformat(),
+        "warning": (
+            "Research estimate for the next usable observation only. "
+            "The model is not validated for long-term targets. Compare "
+            "holdout errors with the last-close baseline. Validation "
+            "results do not guarantee future accuracy. Sentiment is a "
+            "heuristic overlay, not a learned causal effect. "
+            "Not financial advice."
+        ),
+        **metadata,
+    }
+
+===== src\sentiment.py =====
+import re
+from datetime import datetime,timezone
+import feedparser,pandas as pd
+from urllib.parse import quote_plus
+from .config import NEWS
+POS={"beat","growth","profit","upgrade","surge","record","strong","gain","bullish","buyback","expansion","wins","positive","recovery","improve","outperform"}
+NEG={"loss","miss","downgrade","fraud","probe","investigation","decline","fall","drop","weak","bearish","default","debt","crisis","penalty","lawsuit","negative","warning","cut","resign"}
+def score(text):
+    words=re.findall(r"[a-z]+",(text or "").lower()); p=sum(w in POS for w in words); n=sum(w in NEG for w in words)
+    val=(p-n)/max(1,p+n); label="positive" if val>.1 else "negative" if val<-.1 else "neutral"
+    return float(val),label
+def fetch(name,limit=25):
+    url="https://news.google.com/rss/search?q="+quote_plus(f'"{name}" stock India')+"&hl=en-IN&gl=IN&ceid=IN:en"
+    feed=feedparser.parse(url); rows=[]
+    for e in feed.entries[:limit]:
+        title=str(getattr(e,"title","")); summary=re.sub("<[^>]+>"," ",str(getattr(e,"summary","")))
+        val,label=score(title+" "+summary)
+        rows.append({"title":title,"summary":summary,"published":getattr(e,"published",""),"sentiment_score":val,
+                     "sentiment_label":label,"source_url":getattr(e,"link","")})
+    df=pd.DataFrame(rows)
+    if not df.empty:
+        stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe=re.sub(r"[^A-Za-z0-9_-]+","_",name); df.to_csv(NEWS/f"{safe}_{stamp}.csv",index=False)
+    return df
+def aggregate(df):
+    if df is None or df.empty: return {"sentiment_score":0.0,"sentiment_label":"unavailable","news_count":0,
+        "sentiment_status":"No news retrieved; zero is a fallback, not proof of neutral sentiment"}
+    avg=float(pd.to_numeric(df.sentiment_score,errors="coerce").dropna().mean())
+    label="positive" if avg>.1 else "negative" if avg<-.1 else "neutral"
+    return {"sentiment_score":avg,"sentiment_label":label,"news_count":len(df),"sentiment_status":"Simple word-lexicon baseline"}
+
+===== src\universe.py =====
+import re
+import pandas as pd
+from .config import MASTER_CSV,MASTER_XLSX
+def clean(x):
+    if pd.isna(x): return ""
+    return re.sub(r"\\s+"," ",str(x)).strip()
+def standardize(df):
+    df=df.copy(); df.columns=[str(c).strip().lower() for c in df.columns]
+    aliases={"name":"company_name","company":"company_name","company name":"company_name",
+             "symbol":"ticker","trading_symbol":"ticker","yahoo_symbol":"provider_symbol"}
+    for a,b in aliases.items():
+        if a in df.columns and b not in df.columns: df=df.rename(columns={a:b})
+    if "company_name" not in df: raise ValueError("Master needs company_name or name")
+    for c,default in [("exchange","UNKNOWN"),("ticker",""),("provider_symbol",""),("sector",""),
+                      ("industry",""),("isin",""),("security_code",""),("listing_status","")]:
+        if c not in df: df[c]=default
+    for c in ["company_name","exchange","ticker","provider_symbol","sector","industry","isin","security_code","listing_status"]:
+        df[c]=df[c].map(clean)
+    df["exchange"]=df["exchange"].str.upper()
+    df["search_name"]=df["company_name"].str.casefold()
+    df["search_ticker"]=df["ticker"].str.casefold()
+    return df.drop_duplicates(["company_name","exchange","ticker","security_code"],keep="last").reset_index(drop=True)
+def load_master():
+    if MASTER_CSV.exists(): return standardize(pd.read_csv(MASTER_CSV,dtype=str).fillna(""))
+    if MASTER_XLSX.exists(): return standardize(pd.read_excel(MASTER_XLSX).fillna(""))
+    raise FileNotFoundError(f"Place companies_master.csv at {MASTER_CSV}")
+def provider_symbol(row):
+    s=clean(row.get("provider_symbol",""))
+    if s and s.lower() not in ("nan","none"): return s
+    t=clean(row.get("ticker","")); ex=clean(row.get("exchange","")).upper()
+    if not t: return ""
+    if t.startswith("^") or t.endswith((".NS",".BO")): return t
+    if ex=="NSE": return t+".NS"
+    if ex=="BSE":
+        code=clean(row.get("security_code",""))
+        return f"{code}.BO" if code.isdigit() else t+".BO"
+    return ""
+
+===== src\walk_forward.py =====
+
+import numpy as np
+import pandas as pd
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+from .config import MIN_ROWS
+from .features import FEATURES, training_frame
+from .predict import _make_model, _directional_accuracy
+
+
+def _metrics(actual, predicted):
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    return {
+        "mae": float(mean_absolute_error(actual, predicted)),
+        "rmse": float(np.sqrt(mean_squared_error(actual, predicted))),
+    }
+
+
+def walk_forward_validate(raw, folds=5, min_test_rows=10):
+    """Evaluate next-observation predictions with expanding training windows."""
+
+    if folds < 2 or min_test_rows < 1:
+        return {
+            "status": "INVALID_SETTINGS",
+            "message": "Use at least 2 folds and 1 test row per fold.",
+        }
+
+    if raw is None or raw.empty:
+        return {
+            "status": "NO_PRICE_HISTORY",
+            "message": "No historical market data is available.",
+        }
+
+    frame = training_frame(raw)
+
+    if frame.empty:
+        return {
+            "status": "INSUFFICIENT_HISTORY",
+            "message": "No usable feature and target rows are available.",
+        }
+
+    X = frame[FEATURES].replace([np.inf, -np.inf], np.nan)
+    returns = pd.to_numeric(frame["target_next_return"], errors="coerce")
+    current_close = pd.to_numeric(frame["close"], errors="coerce")
+    target_close = pd.to_numeric(frame["target_next_close"], errors="coerce")
+
+    valid = (
+        returns.notna()
+        & current_close.notna()
+        & target_close.notna()
+        & np.isfinite(returns)
+        & np.isfinite(current_close)
+        & np.isfinite(target_close)
+        & (current_close > 0)
+        & (target_close > 0)
+        & X.notna().all(axis=1)
+    )
+
+    X = X.loc[valid].reset_index(drop=True)
+    returns = returns.loc[valid].reset_index(drop=True)
+    current_close = current_close.loc[valid].reset_index(drop=True)
+    target_close = target_close.loc[valid].reset_index(drop=True)
+
+    n = len(X)
+    initial_train_rows = max(MIN_ROWS, n // 2)
+
+    if (
+        initial_train_rows >= n
+        or n - initial_train_rows < folds * min_test_rows
+    ):
+        return {
+            "status": "INSUFFICIENT_HISTORY",
+            "message": (
+                f"Not enough usable rows: {n}. Need at least {MIN_ROWS} "
+                "training rows and enough observations for every test fold."
+            ),
+            "usable_rows": n,
+            "folds_requested": folds,
+            "minimum_test_rows_per_fold": min_test_rows,
+        }
+
+    boundaries = np.linspace(
+        initial_train_rows, n, folds + 1, dtype=int
+    )
+
+    actual_all = []
+    predicted_all = []
+    baseline_all = []
+    actual_returns_all = []
+    predicted_returns_all = []
+    fold_results = []
+
+    for fold in range(folds):
+        start = int(boundaries[fold])
+        end = int(boundaries[fold + 1])
+
+        if end - start < min_test_rows:
+            return {
+                "status": "INSUFFICIENT_HISTORY",
+                "message": f"Fold {fold + 1} has too few test rows.",
+            }
+
+        model = _make_model()
+        model.fit(X.iloc[:start], returns.iloc[:start])
+
+        predicted_returns = np.asarray(
+            model.predict(X.iloc[start:end]), dtype=float
+        )
+
+        if not np.isfinite(predicted_returns).all():
+            return {
+                "status": "INVALID_FORECAST",
+                "message": f"Non-finite predictions in fold {fold + 1}.",
+            }
+
+        current = current_close.iloc[start:end].to_numpy(dtype=float)
+        actual = target_close.iloc[start:end].to_numpy(dtype=float)
+        predicted = current * (1.0 + predicted_returns)
+        baseline = current.copy()
+
+        if not np.isfinite(predicted).all() or (predicted <= 0).any():
+            return {
+                "status": "INVALID_FORECAST",
+                "message": f"Invalid predicted prices in fold {fold + 1}.",
+            }
+
+        model_metrics = _metrics(actual, predicted)
+        baseline_metrics = _metrics(actual, baseline)
+
+        fold_results.append({
+            "fold": fold + 1,
+            "train_rows": start,
+            "test_rows": end - start,
+            "model_mae": model_metrics["mae"],
+            "model_rmse": model_metrics["rmse"],
+            "baseline_mae": baseline_metrics["mae"],
+            "baseline_rmse": baseline_metrics["rmse"],
+            "model_beats_baseline_mae": (
+                model_metrics["mae"] < baseline_metrics["mae"]
+            ),
+            "model_beats_baseline_rmse": (
+                model_metrics["rmse"] < baseline_metrics["rmse"]
+            ),
+        })
+
+        actual_all.extend(actual)
+        predicted_all.extend(predicted)
+        baseline_all.extend(baseline)
+        actual_returns_all.extend(
+            returns.iloc[start:end].to_numpy(dtype=float)
+        )
+        predicted_returns_all.extend(predicted_returns)
+
+    model_metrics = _metrics(actual_all, predicted_all)
+    baseline_metrics = _metrics(actual_all, baseline_all)
+
+    return {
+        "status": "OK",
+        "forecast_horizon": "NEXT_OBSERVATION",
+        "validation_method": "EXPANDING_WINDOW",
+        "folds_completed": len(fold_results),
+        "usable_rows": n,
+        "initial_training_rows": initial_train_rows,
+        "evaluated_rows": len(actual_all),
+        "model_mae": model_metrics["mae"],
+        "model_rmse": model_metrics["rmse"],
+        "baseline_name": "LAST_CLOSE",
+        "baseline_mae": baseline_metrics["mae"],
+        "baseline_rmse": baseline_metrics["rmse"],
+        "model_beats_baseline_mae": (
+            model_metrics["mae"] < baseline_metrics["mae"]
+        ),
+        "model_beats_baseline_rmse": (
+            model_metrics["rmse"] < baseline_metrics["rmse"]
+        ),
+        "directional_accuracy_pct": _directional_accuracy(
+            actual_returns_all, predicted_returns_all
+        ),
+        "folds": fold_results,
+        "warning": (
+            "Historical validation does not guarantee future performance. "
+            "This evaluates next-observation predictions only, not "
+            "one-month or multi-year forecasts. Not financial advice."
+        ),
+    }
+
+===== src\__init__.py =====
+
+===== app\streamlit_app.py =====
+import sys
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from src.universe import load_master,provider_symbol
+from src.market_data import history
+from src.sentiment import fetch,aggregate
+from src.predict import predict
+
+st.set_page_config(page_title="StockAI India",page_icon="📈",layout="wide")
+st.markdown("""
+<style>
+.block-container {padding-top:1.5rem;max-width:1450px}
+.hero {padding:1.5rem;border-radius:20px;background:linear-gradient(120deg,#101d38,#2a4777);color:white;margin-bottom:1rem}
+.hero h1 {font-size:2rem;margin:0 0 .4rem 0}.hero p {color:#dbe7ff;margin:0}
+[data-testid="stMetric"] {background:#f7f9fc;padding:1rem;border:1px solid #e7edf5;border-radius:14px}
+</style>
+<div class="hero"><h1>StockAI <span style="color:#9fb7ff">India</span></h1>
+<p>NSE &amp; BSE · Market intelligence · Next-session forecast · Company news sentiment</p></div>
+""",unsafe_allow_html=True)
+@st.cache_data(ttl=300)
+def master_data(): return load_master()
+try: master=master_data()
+except Exception as e: st.error(f"Company master error: {e}"); st.stop()
+st.caption(f"Searchable exchange listing records: {len(master):,}. Price data is provider-sourced and may be delayed.")
+q=st.text_input("Search company",placeholder="Enter 2+ characters: rel, tcs, infosys…")
+if len(q.strip())<2:
+    st.info("Type at least two characters to search."); shown=master.head(10)
+else:
+    q=q.casefold().strip()
+    shown=master[master.search_name.str.contains(q,regex=False,na=False)|master.search_ticker.str.contains(q,regex=False,na=False)].head(100)
+if shown.empty: st.warning("No match in the loaded company master."); st.stop()
+def label(i):
+    r=shown.loc[i]; return f"{r.company_name} · {r.exchange} · {r.ticker or 'No ticker'}"
+chosen=st.selectbox("Select a company",list(shown.index),format_func=label)
+r=master.loc[chosen]
+st.subheader(r.company_name)
+a,b,c=st.columns(3); a.metric("Exchange",r.exchange or "—"); b.metric("Ticker",r.ticker or "—"); c.metric("Sector",r.sector or "Not available")
+with st.expander("Company identifiers and details"):
+    st.write("ISIN:",r.isin or "Not available"); st.write("Security code:",r.security_code or "Not available")
+    st.write("Listing status:",r.listing_status or "Not verified")
+    if "description" in r and str(r.description).strip(): st.write(r.description)
+symbol=provider_symbol(r); st.caption(f"Price-provider mapping: {symbol or 'not available'}")
+x,y=st.columns(2); refresh=x.button("↻ Refresh price data",use_container_width=True); refresh_news=y.button("◎ Refresh news sentiment",use_container_width=True)
+if not symbol: st.warning("No provider symbol mapped. Company stays searchable; prediction is unavailable until mapping is validated."); st.stop()
+with st.spinner("Loading market history…"): h=history(symbol,refresh)
+if h.empty: st.error("No history returned by the provider. Check mapping or coverage."); st.stop()
+datecol="Date"; h[datecol]=pd.to_datetime(h[datecol],errors="coerce"); h=h.dropna(subset=[datecol,"Close"]).sort_values(datecol)
+actual=float(h.Close.iloc[-1]); market_date=h.Date.iloc[-1].date()
+key="news_"+str(r.company_name)
+if refresh_news or key not in st.session_state:
+    with st.spinner("Fetching company news…"): st.session_state[key]=fetch(r.company_name)
+news=st.session_state[key]; sent=aggregate(news)
+with st.spinner("Evaluating chronological holdout and forecasting…"): p=predict(h,sent["sentiment_score"])
+if p.get("status")!="OK": st.warning(p.get("message","Forecast unavailable.")); st.stop()
+m1,m2,m3,m4=st.columns(4)
+m1.metric("Latest actual close",f"₹{actual:,.2f}",help=f"Provider observation date: {market_date}")
+m2.metric("Predicted next close",f"₹{p['predicted_next_close']:,.2f}",f"{p['predicted_change']:+,.2f}")
+m3.metric("Expected return",f"{p['sentiment_adjusted_return_pct']:+.2f}%")
+m4.metric("Signal",p["decision"],help="Rule-based estimate, not an order.")
+st.caption(f"Forecast horizon: next observed trading session after {market_date}. Generated: {p['prediction_timestamp_utc']}")
+fig=go.Figure(); fig.add_trace(go.Scatter(x=h.Date,y=h.Close,name="Actual close",mode="lines"))
+fig.add_trace(go.Scatter(x=[market_date],y=[p["predicted_next_close"]],name="Predicted next close",mode="markers",marker=dict(size=13,symbol="diamond")))
+fig.update_layout(height=370,margin=dict(l=10,r=10,t=25,b=10),legend=dict(orientation="h",y=1.1),xaxis_title="Trading date",yaxis_title="Price (₹)",hovermode="x unified")
+st.plotly_chart(fig,use_container_width=True)
+a,b,c=st.columns(3); a.metric("News sentiment",sent["sentiment_label"].title()); b.metric("Sentiment score",f"{sent['sentiment_score']:+.3f}"); c.metric("News items",sent["news_count"])
+st.caption(sent["sentiment_status"])
+with st.expander("Model quality and methodology"):
+    st.write("Model:",p["model"]); st.write("Feature schema:",p["feature_schema_version"])
+    st.write("Training rows:",p["training_rows"]); st.write("Holdout rows:",p["holdout_rows"])
+    st.write(f"Chronological holdout MAE: ₹{p['mae_holdout']:.4f}")
+    st.write(f"Chronological holdout RMSE: ₹{p['rmse_holdout']:.4f}")
+    st.warning(p["warning"])
+with st.expander("Latest company news"):
+    if news.empty: st.info("No items retrieved; this does not mean sentiment is neutral.")
+    else:
+        for _,item in news.head(10).iterrows():
+            st.markdown(f"**{item['title']}**"); st.caption(f"{item['published']} · {item['sentiment_label']} · {item['sentiment_score']:+.2f}")
+            if item.get("source_url"): st.markdown(f"[Open article]({item['source_url']})")
+with st.expander("Recent actual market data"): st.dataframe(h.tail(20),use_container_width=True,hide_index=True)
+st.markdown("---")
+st.caption("Research demonstration only. Data coverage, forecasts and sentiment are uncertain; this is not financial advice.")
+
+===== scripts\batch_predict.py =====
+
+import argparse
+import re
+from datetime import datetime, timezone
+
+import pandas as pd
+
+from src.universe import load_master, provider_symbol
+from src.market_data import history
+from src.sentiment import fetch, aggregate
+from src.predict import predict
+from src.config import PRED
+
+
+def is_rights_entitlement(ticker):
+    """Match rights-entitlement tickers ending in -RE, -RE1, -RE2, etc."""
+    return bool(
+        re.search(
+            r"-RE\d*$",
+            str(ticker).strip(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate predictions for the IT company master."
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Process only the first N master records; 0 means all.",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh market history before predicting.",
+    )
+    parser.add_argument(
+        "--news",
+        action="store_true",
+        help="Fetch news sentiment for each eligible company.",
+    )
+    args = parser.parse_args()
+
+    if args.limit < 0:
+        parser.error("--limit must be zero or a positive integer")
+
+    master = load_master()
+
+    if args.limit > 0:
+        master = master.head(args.limit)
+
+    PRED.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    total = len(master)
+
+    for index, (_, company) in enumerate(master.iterrows(), start=1):
+        name = str(company.get("company_name", ""))
+        exchange = str(company.get("exchange", ""))
+        ticker = str(company.get("ticker", ""))
+        symbol = provider_symbol(company)
+
+        base = {
+            "company_name": name,
+            "exchange": exchange,
+            "ticker": ticker,
+            "provider_symbol": symbol,
+        }
+
+        if is_rights_entitlement(ticker):
+            result = {
+                **base,
+                "status": "SKIPPED_NON_ORDINARY_SECURITY",
+                "message": (
+                    "Rights-entitlement security; ordinary-share "
+                    "prediction skipped."
+                ),
+            }
+            results.append(result)
+            print(
+                f"[{index}/{total}] {name}: "
+                "SKIPPED_NON_ORDINARY_SECURITY"
+            )
+            continue
+
+        try:
+            prices = history(symbol, refresh=args.refresh) if symbol else pd.DataFrame()
+
+            if prices.empty:
+                result = {
+                    **base,
+                    "status": "NO_PRICE_HISTORY",
+                    "message": (
+                        "No local price history is available. "
+                        "Provider coverage and listing status are unverified."
+                    ),
+                    "raw_history_rows": 0,
+                }
+            else:
+                if args.news:
+                    sentiment = aggregate(fetch(name))
+                else:
+                    sentiment = {
+                        "sentiment_score": 0.0,
+                        "sentiment_label": "unavailable",
+                        "news_count": 0,
+                        "sentiment_status": "not requested",
+                    }
+
+                prediction = predict(
+                    prices,
+                    sentiment.get("sentiment_score", 0.0),
+                )
+
+                result = {
+                    **base,
+                    **sentiment,
+                    **prediction,
+                }
+
+        except Exception as exc:
+            result = {
+                **base,
+                "status": "FAILED",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+
+        results.append(result)
+
+        print(
+            f"[{index}/{total}] {name}: "
+            f"{result.get('status', 'UNKNOWN')}"
+        )
+
+    output = pd.DataFrame(results)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    timestamped_file = PRED / f"predictions_{timestamp}.csv"
+    latest_file = PRED / "predictions_latest.csv"
+
+    output.to_csv(timestamped_file, index=False)
+    output.to_csv(latest_file, index=False)
+
+    print("\nSTATUS SUMMARY")
+    if not output.empty and "status" in output.columns:
+        print(output["status"].value_counts(dropna=False).to_string())
+    else:
+        print("No records were processed.")
+
+    print(f"\nTimestamped report: {timestamped_file}")
+    print(f"Latest report:      {latest_file}")
+
+
+if __name__ == "__main__":
+    main()
+
+===== scripts\update_market_data.py =====
+from datetime import datetime, timezone
+import json
+import re
+import time
+
+import pandas as pd
+
+from src.universe import load_master, provider_symbol
+from src.market_data import update, read
+from src.config import LOGS
+
+
+def is_rights_entitlement(row):
+    ticker = str(row.get("ticker", "")).strip()
+    return bool(re.search(r"-RE\d*$", ticker, flags=re.IGNORECASE))
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--delay", type=float, default=0.4)
+    parser.add_argument(
+        "--force-backfill",
+        action="store_true",
+        help="Explicitly request a historical backfill for processed symbols.",
+    )
+    args = parser.parse_args()
+
+    master = load_master()
+
+    if args.limit > 0:
+        master = master.head(args.limit)
+
+    results = []
+    skipped_rights = []
+
+    for _, row in master.iterrows():
+        if is_rights_entitlement(row):
+            skipped_rights.append({
+                "company_name": row.get("company_name", ""),
+                "exchange": row.get("exchange", ""),
+                "ticker": row.get("ticker", ""),
+                "reason": "RIGHTS_ENTITLEMENT",
+            })
+            continue
+
+        symbol = provider_symbol(row)
+
+        try:
+            result = update(
+                symbol,
+                force_backfill=args.force_backfill,
+            )
+        except Exception as exc:
+            result = {
+                "symbol": symbol,
+                "status": "FAILED",
+                "rows": 0,
+                "history_quality": "UNAVAILABLE",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        history = read(symbol) if symbol else pd.DataFrame()
+        result.update({
+            "company_name": row.get("company_name", ""),
+            "exchange": row.get("exchange", ""),
+            "ticker": row.get("ticker", ""),
+            "latest_date": (
+                str(history["Date"].max().date())
+                if not history.empty else result.get("latest_date", "")
+            ),
+            "history_quality": (
+                "ADEQUATE"
+                if len(history) >= 120
+                else "SHORT_HISTORY"
+                if not history.empty
+                else "UNAVAILABLE"
+            ),
+        })
+
+        results.append(result)
+        print(
+            f"[{len(results)}/{len(master) - len(skipped_rights)}] "
+            f"{symbol}: {result['status']} | "
+            f"{result['history_quality']} | rows={result.get('rows', 0)}"
+        )
+        time.sleep(max(0, args.delay))
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    report = pd.DataFrame(results)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    report.to_csv(LOGS / f"market_update_{stamp}.csv", index=False)
+    report.to_csv(LOGS / "market_update_latest.csv", index=False)
+
+    summary = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "master_records_considered": len(master),
+        "processed_records": len(results),
+        "skipped_rights_entitlements": len(skipped_rights),
+        "updated": sum(r.get("status") == "UPDATED" for r in results),
+        "failed": sum(r.get("status") == "FAILED" for r in results),
+        "no_new_data": sum(r.get("status") == "NO_NEW_DATA" for r in results),
+        "adequate_history": sum(
+            r.get("history_quality") == "ADEQUATE" for r in results
+        ),
+        "short_history": sum(
+            r.get("history_quality") == "SHORT_HISTORY" for r in results
+        ),
+        "unavailable_history": sum(
+            r.get("history_quality") == "UNAVAILABLE" for r in results
+        ),
+        "skipped_rights_details": skipped_rights,
+    }
+
+    (LOGS / "market_update_summary_latest.json").write_text(
+        json.dumps(summary, indent=2),
+        encoding="utf-8",
+    )
+    print("\nSUMMARY")
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == "__main__":
+    main()
+
+===== scripts\walk_forward_validate.py =====
+
+import argparse
+import json
+
+from src.market_data import history
+from src.walk_forward import walk_forward_validate
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Walk-forward validation for StockAI."
+    )
+    parser.add_argument("--ticker", default="INFY.NS")
+    parser.add_argument("--folds", type=int, default=5)
+    parser.add_argument("--min-test-rows", type=int, default=10)
+    args = parser.parse_args()
+
+    raw = history(args.ticker)
+
+    result = walk_forward_validate(
+        raw,
+        folds=args.folds,
+        min_test_rows=args.min_test_rows,
+    )
+
+    print(json.dumps(result, indent=2, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()
+
+===== tests\audit_market_data.py =====
+
+import pandas as pd
+
+from src.market_data import history
+
+
+df = history("INFY.NS").copy()
+df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+print("Rows:", len(df))
+print("Invalid dates:", df["Date"].isna().sum())
+print("Dates sorted:", df["Date"].is_monotonic_increasing)
+print("Duplicate dates:", df["Date"].duplicated().sum())
+
+print("\nMissing values:")
+print(df.isna().sum().to_string())
+
+price_columns = ["Open", "High", "Low", "Close", "Adj_Close"]
+
+print("\nNon-positive prices:")
+print((df[price_columns] <= 0).sum().to_string())
+
+print("\nOHLC consistency violations:")
+violations = {
+    "High_below_Open_or_Close": int(
+        (df["High"] < df[["Open", "Close"]].max(axis=1)).sum()
+    ),
+    "Low_above_Open_or_Close": int(
+        (df["Low"] > df[["Open", "Close"]].min(axis=1)).sum()
+    ),
+    "High_below_Low": int((df["High"] < df["Low"]).sum()),
+}
+print(violations)
+
+print("\nLargest absolute close-to-close changes (%):")
+changes = df["Close"].pct_change(fill_method=None).mul(100).abs()
+print(changes.nlargest(10).to_string())
+
+print("\nLargest absolute adjusted-close changes (%):")
+adjusted_changes = (
+    df["Adj_Close"].pct_change(fill_method=None).mul(100).abs()
+)
+print(adjusted_changes.nlargest(10).to_string())
+
+===== tests\test_core.py =====
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from src.features import features, FEATURES
+from src.predict import decision, predict
+
+
+class CoreTests(unittest.TestCase):
+
+    def test_feature_columns(self):
+        rng = np.random.default_rng(3)
+        n = 220
+        close = 100 * np.cumprod(
+            1 + rng.normal(0, 0.01, n)
+        )
+
+        data = pd.DataFrame({
+            "Date": pd.bdate_range("2020-01-01", periods=n),
+            "Open": close * 0.999,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": rng.integers(100, 10000, n),
+        })
+
+        result = features(data)
+
+        self.assertTrue(set(FEATURES).issubset(result.columns))
+        self.assertEqual(len(result), n)
+
+    def test_signal_thresholds(self):
+        self.assertEqual(decision(0.02), "BUY")
+        self.assertEqual(decision(-0.02), "SELL")
+        self.assertEqual(decision(0.0), "HOLD")
+
+    def test_predict_rejects_insufficient_history(self):
+        rng = np.random.default_rng(42)
+        n = 60
+        close = 100 * np.cumprod(
+            1 + rng.normal(0, 0.01, n)
+        )
+
+        data = pd.DataFrame({
+            "Date": pd.bdate_range("2024-01-01", periods=n),
+            "Open": close * 0.999,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": rng.integers(100, 10000, n),
+        })
+
+        result = predict(data)
+
+        self.assertNotEqual(result.get("status"), "OK")
+
+    def test_prediction_validation_fields(self):
+        rng = np.random.default_rng(123)
+        n = 350
+
+        close = 100 * np.cumprod(
+            1 + rng.normal(0.0002, 0.01, n)
+        )
+
+        data = pd.DataFrame({
+            "Date": pd.bdate_range("2023-01-01", periods=n),
+            "Open": close * 0.999,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": rng.integers(1000, 100000, n),
+        })
+
+        result = predict(data)
+
+        self.assertEqual(result.get("status"), "OK")
+        self.assertIn("mae_holdout", result)
+        self.assertIn("rmse_holdout", result)
+        self.assertIn("baseline_mae_holdout", result)
+        self.assertIn("baseline_rmse_holdout", result)
+        self.assertIn("model_beats_baseline_mae", result)
+        self.assertIn("model_beats_baseline_rmse", result)
+        self.assertEqual(
+            result.get("forecast_horizon"),
+            "NEXT_OBSERVATION",
+        )
+
+        self.assertGreaterEqual(result["mae_holdout"], 0)
+        self.assertGreaterEqual(result["rmse_holdout"], 0)
+        self.assertGreaterEqual(result["baseline_mae_holdout"], 0)
+        self.assertGreaterEqual(result["baseline_rmse_holdout"], 0)
+
+        self.assertEqual(
+            result["model_beats_baseline_mae"],
+            result["mae_holdout"] < result["baseline_mae_holdout"],
+        )
+        self.assertEqual(
+            result["model_beats_baseline_rmse"],
+            result["rmse_holdout"] < result["baseline_rmse_holdout"],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+===== tests\test_walk_forward.py =====
+
+import unittest
+
+import numpy as np
+import pandas as pd
+
+from src.walk_forward import walk_forward_validate
+
+
+class WalkForwardTests(unittest.TestCase):
+
+    @staticmethod
+    def sample_history(n=350):
+        rng = np.random.default_rng(123)
+
+        close = 100 * np.cumprod(
+            1 + rng.normal(0.0002, 0.01, n)
+        )
+
+        return pd.DataFrame({
+            "Date": pd.bdate_range("2023-01-01", periods=n),
+            "Open": close * 0.999,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": rng.integers(1000, 100000, n),
+        })
+
+    def test_walk_forward_returns_five_folds(self):
+        result = walk_forward_validate(
+            self.sample_history(),
+            folds=5,
+            min_test_rows=10,
+        )
+
+        self.assertEqual(result["status"], "OK")
+        self.assertEqual(result["folds_completed"], 5)
+        self.assertEqual(result["validation_method"], "EXPANDING_WINDOW")
+        self.assertEqual(len(result["folds"]), 5)
+        self.assertGreater(result["evaluated_rows"], 0)
+
+        for key in (
+            "model_mae",
+            "model_rmse",
+            "baseline_mae",
+            "baseline_rmse",
+        ):
+            self.assertTrue(np.isfinite(result[key]))
+            self.assertGreaterEqual(result[key], 0)
+
+    def test_walk_forward_rejects_short_history(self):
+        result = walk_forward_validate(
+            self.sample_history(150),
+            folds=5,
+            min_test_rows=10,
+        )
+
+        self.assertEqual(result["status"], "INSUFFICIENT_HISTORY")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+===== MASTER DATA SUMMARY =====
+
+FILE: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\data\master\companies_master.csv
+ROWS: 126
+COLUMNS: company_name, exchange, ticker, security_code, isin, provider_symbol, sector, industry, listing_status, category

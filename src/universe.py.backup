@@ -1,0 +1,37 @@
+import re
+import pandas as pd
+from .config import MASTER_CSV,MASTER_XLSX
+def clean(x):
+    if pd.isna(x): return ""
+    return re.sub(r"\\s+"," ",str(x)).strip()
+def standardize(df):
+    df=df.copy(); df.columns=[str(c).strip().lower() for c in df.columns]
+    aliases={"name":"company_name","company":"company_name","company name":"company_name",
+             "symbol":"ticker","trading_symbol":"ticker","yahoo_symbol":"provider_symbol"}
+    for a,b in aliases.items():
+        if a in df.columns and b not in df.columns: df=df.rename(columns={a:b})
+    if "company_name" not in df: raise ValueError("Master needs company_name or name")
+    for c,default in [("exchange","UNKNOWN"),("ticker",""),("provider_symbol",""),("sector",""),
+                      ("industry",""),("isin",""),("security_code",""),("listing_status","")]:
+        if c not in df: df[c]=default
+    for c in ["company_name","exchange","ticker","provider_symbol","sector","industry","isin","security_code","listing_status"]:
+        df[c]=df[c].map(clean)
+    df["exchange"]=df["exchange"].str.upper()
+    df["search_name"]=df["company_name"].str.casefold()
+    df["search_ticker"]=df["ticker"].str.casefold()
+    return df.drop_duplicates(["company_name","exchange","ticker","security_code"],keep="last").reset_index(drop=True)
+def load_master():
+    if MASTER_CSV.exists(): return standardize(pd.read_csv(MASTER_CSV,dtype=str).fillna(""))
+    if MASTER_XLSX.exists(): return standardize(pd.read_excel(MASTER_XLSX).fillna(""))
+    raise FileNotFoundError(f"Place companies_master.csv at {MASTER_CSV}")
+def provider_symbol(row):
+    s=clean(row.get("provider_symbol",""))
+    if s and s.lower() not in ("nan","none"): return s
+    t=clean(row.get("ticker","")); ex=clean(row.get("exchange","")).upper()
+    if not t: return ""
+    if t.startswith("^") or t.endswith((".NS",".BO")): return t
+    if ex=="NSE": return t+".NS"
+    if ex=="BSE":
+        code=clean(row.get("security_code",""))
+        return f"{code}.BO" if code.isdigit() else t+".BO"
+    return ""

@@ -1,0 +1,130 @@
+﻿from datetime import datetime, timezone
+import json
+import re
+import time
+
+import pandas as pd
+
+from src.universe import load_master, provider_symbol
+from src.market_data import update, read
+from src.config import LOGS
+
+
+def is_rights_entitlement(row):
+    ticker = str(row.get("ticker", "")).strip()
+    return bool(re.search(r"-RE\d*$", ticker, flags=re.IGNORECASE))
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--delay", type=float, default=0.4)
+    parser.add_argument(
+        "--force-backfill",
+        action="store_true",
+        help="Explicitly request a historical backfill for processed symbols.",
+    )
+    args = parser.parse_args()
+
+    master = load_master()
+
+    if args.limit > 0:
+        master = master.head(args.limit)
+
+    results = []
+    skipped_rights = []
+
+    for _, row in master.iterrows():
+        if is_rights_entitlement(row):
+            skipped_rights.append({
+                "company_name": row.get("company_name", ""),
+                "exchange": row.get("exchange", ""),
+                "ticker": row.get("ticker", ""),
+                "reason": "RIGHTS_ENTITLEMENT",
+            })
+            continue
+
+        symbol = provider_symbol(row)
+
+        try:
+            result = update(
+                symbol,
+                force_backfill=args.force_backfill,
+                exchange=row.get("exchange", ""),
+                ticker=row.get("ticker", ""),
+                security_code=row.get("security_code", ""),
+            )
+        except Exception as exc:
+            result = {
+                "symbol": symbol,
+                "status": "FAILED",
+                "rows": 0,
+                "history_quality": "UNAVAILABLE",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+        history = read(symbol) if symbol else pd.DataFrame()
+        result.update({
+            "company_name": row.get("company_name", ""),
+            "exchange": row.get("exchange", ""),
+            "ticker": row.get("ticker", ""),
+            "latest_date": (
+                str(history["Date"].max().date())
+                if not history.empty else result.get("latest_date", "")
+            ),
+            "history_quality": (
+                "ADEQUATE"
+                if len(history) >= 120
+                else "SHORT_HISTORY"
+                if not history.empty
+                else "UNAVAILABLE"
+            ),
+        })
+
+        results.append(result)
+        print(
+            f"[{len(results)}/{len(master) - len(skipped_rights)}] "
+            f"{symbol}: {result['status']} | "
+            f"{result['history_quality']} | rows={result.get('rows', 0)}"
+        )
+        time.sleep(max(0, args.delay))
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    report = pd.DataFrame(results)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    report.to_csv(LOGS / f"market_update_{stamp}.csv", index=False)
+    report.to_csv(LOGS / "market_update_latest.csv", index=False)
+
+    summary = {
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "master_records_considered": len(master),
+        "processed_records": len(results),
+        "skipped_rights_entitlements": len(skipped_rights),
+        "updated": sum(r.get("status") == "UPDATED" for r in results),
+        "failed": sum(r.get("status") == "FAILED" for r in results),
+        "no_new_data": sum(r.get("status") == "NO_NEW_DATA" for r in results),
+        "adequate_history": sum(
+            r.get("history_quality") == "ADEQUATE" for r in results
+        ),
+        "short_history": sum(
+            r.get("history_quality") == "SHORT_HISTORY" for r in results
+        ),
+        "unavailable_history": sum(
+            r.get("history_quality") == "UNAVAILABLE" for r in results
+        ),
+        "skipped_rights_details": skipped_rights,
+    }
+
+    (LOGS / "market_update_summary_latest.json").write_text(
+        json.dumps(summary, indent=2),
+        encoding="utf-8",
+    )
+    print("\nSUMMARY")
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == "__main__":
+    main()

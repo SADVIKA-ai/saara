@@ -1,0 +1,48 @@
+Started UTC: 20261101T165953Z
+Full master requested: False
+
+=== MARKET DATA UPDATE ===
+Command: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\.venv\Scripts\python.exe -m scripts.update_market_data --delay 0.4 --limit 3
+[1/2] 3IINFOLTD.NS: REFRESHED_NO_NEW_DATES | ADEQUATE | rows=2476
+INFO::Get BSE listed securities
+[2/2] 3IINFOLTD.BO: REFRESHED_NO_NEW_DATES | ADEQUATE | rows=2474
+
+SUMMARY
+{
+  "timestamp_utc": "2026-11-01T16:59:57.500735+00:00",
+  "master_records_considered": 3,
+  "processed_records": 2,
+  "skipped_rights_entitlements": 1,
+  "updated": 0,
+  "failed": 0,
+  "no_new_data": 0,
+  "adequate_history": 2,
+  "short_history": 0,
+  "unavailable_history": 0,
+  "skipped_rights_details": [
+    {
+      "company_name": "3i Infotech limited",
+      "exchange": "BSE",
+      "ticker": "3IINFO-RE",
+      "reason": "RIGHTS_ENTITLEMENT"
+    }
+  ]
+}
+
+Exit code: 0
+
+=== PREDICTIONS AND SENTIMENT ===
+Command: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\.venv\Scripts\python.exe -m scripts.batch_predict --limit 3
+[1/3] 3i Infotech limited: SKIPPED_NON_ORDINARY_SECURITY
+[2/3] 3i Infotech Limited: OK
+[3/3] 3I INFOTECH LTD.: OK
+
+STATUS SUMMARY
+status
+OK                               2
+SKIPPED_NON_ORDINARY_SECURITY    1
+
+Timestamped report: C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\data\predictions\predictions_20261101T170001Z.csv
+Latest report:      C:\Users\lavet\Downloads\Equity flow\stock_market_ai_india_cloud\stockai_it_only_package\StockAI_India_ML_Engineer_Package\data\predictions\predictions_latest.csv
+
+Exit code: 0

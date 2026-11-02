@@ -1,0 +1,53 @@
+from datetime import datetime,timedelta
+from pathlib import Path
+import time
+import pandas as pd
+import yfinance as yf
+from .config import RAW,INITIAL_YEARS
+def safe(s): return "".join(c if c.isalnum() or c in "._-" else "_" for c in str(s))
+def path(s): return RAW/(safe(s)+".csv")
+def read(s):
+    p=path(s)
+    if not p.exists(): return pd.DataFrame()
+    try:
+        d=pd.read_csv(p)
+        if "Date" in d: d["Date"]=pd.to_datetime(d["Date"],errors="coerce")
+        return d
+    except Exception: return pd.DataFrame()
+def normalize(d):
+    if d is None or d.empty: return pd.DataFrame()
+    d=d.copy()
+    if isinstance(d.columns,pd.MultiIndex): d.columns=[c[0] for c in d.columns]
+    d=d.reset_index(); d.columns=[str(c).strip().replace(" ","_") for c in d.columns]
+    if "Date" not in d and "Datetime" in d: d=d.rename(columns={"Datetime":"Date"})
+    d["Date"]=pd.to_datetime(d["Date"],errors="coerce").dt.tz_localize(None)
+    return d.dropna(subset=["Date"]).drop_duplicates("Date",keep="last").sort_values("Date")
+def update(s,retries=3):
+    if not s: return {"symbol":s,"status":"NO_SYMBOL","rows":0,"error":"No provider symbol"}
+    old=read(s); datecol="Date"
+    if not old.empty:
+        last=pd.to_datetime(old[datecol],errors="coerce").max()
+        start=(last-pd.Timedelta(days=5)).date() if pd.notna(last) else (datetime.now()-timedelta(days=365*INITIAL_YEARS)).date()
+    else: start=(datetime.now()-timedelta(days=365*INITIAL_YEARS)).date()
+    fresh=pd.DataFrame(); err=""
+    for i in range(retries):
+        try:
+            fresh=normalize(yf.download(s,start=str(start),end=(datetime.now().date()+timedelta(days=1)).isoformat(),
+                auto_adjust=False,actions=True,progress=False,threads=False))
+            if not fresh.empty: break
+            err="Provider returned no rows"
+        except Exception as e: err=str(e)
+        time.sleep(i+1)
+    if fresh.empty:
+        return {"symbol":s,"status":"NO_NEW_DATA" if not old.empty else "FAILED","rows":len(old),
+                "latest_date":str(pd.to_datetime(old.Date).max().date()) if not old.empty else "", "error":err}
+    combined=pd.concat([old,fresh],ignore_index=True,sort=False)
+    combined["Date"]=pd.to_datetime(combined.Date,errors="coerce")
+    combined=combined.dropna(subset=["Date"]).drop_duplicates("Date",keep="last").sort_values("Date")
+    combined.to_csv(path(s),index=False)
+    return {"symbol":s,"status":"UPDATED","rows":len(combined),"latest_date":str(combined.Date.max().date()),"error":""}
+def history(s,refresh=False):
+    if refresh or not path(s).exists(): update(s)
+    d=read(s)
+    if not d.empty: d=d.dropna(subset=["Date"]).sort_values("Date").drop_duplicates("Date",keep="last")
+    return d

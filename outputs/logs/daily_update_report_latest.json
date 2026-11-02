@@ -1,0 +1,35 @@
+{
+  "run_utc": "20261101T165953Z",
+  "overall_status": "SUCCESS_WITH_EXPECTED_SKIPS",
+  "full_master_requested": false,
+  "market_update_exit_code": 0,
+  "market_summary_fresh": true,
+  "market_update_summary": {
+    "timestamp_utc": "2026-11-01T16:59:57.500735+00:00",
+    "master_records_considered": 3,
+    "processed_records": 2,
+    "skipped_rights_entitlements": 1,
+    "updated": 0,
+    "failed": 0,
+    "no_new_data": 0,
+    "adequate_history": 2,
+    "short_history": 0,
+    "unavailable_history": 0,
+    "skipped_rights_details": [
+      {
+        "company_name": "3i Infotech limited",
+        "exchange": "BSE",
+        "ticker": "3IINFO-RE",
+        "reason": "RIGHTS_ENTITLEMENT"
+      }
+    ]
+  },
+  "prediction_exit_code": 0,
+  "prediction_skipped_reason": null,
+  "prediction_status_counts": {
+    "SKIPPED_NON_ORDINARY_SECURITY": 1,
+    "OK": 2
+  },
+  "expected_non_ordinary_security_skips": 1,
+  "log_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\outputs\\logs\\daily_update_20261101T165953Z.log"
+}

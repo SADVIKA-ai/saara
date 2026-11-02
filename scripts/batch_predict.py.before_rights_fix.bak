@@ -1,0 +1,26 @@
+import argparse
+from datetime import datetime,timezone
+import pandas as pd
+from src.universe import load_master,provider_symbol
+from src.market_data import history
+from src.sentiment import fetch,aggregate
+from src.predict import predict
+from src.config import PRED
+def main():
+    p=argparse.ArgumentParser(); p.add_argument("--limit",type=int,default=0); p.add_argument("--refresh",action="store_true"); p.add_argument("--news",action="store_true"); a=p.parse_args()
+    m=load_master()
+    if a.limit>0: m=m.head(a.limit)
+    rows=[]
+    for i,(_,r) in enumerate(m.iterrows(),1):
+        s=provider_symbol(r)
+        try:
+            h=history(s,a.refresh) if s else pd.DataFrame()
+            sent=aggregate(fetch(r.company_name)) if a.news else {"sentiment_score":0.0,"sentiment_label":"unavailable","news_count":0,"sentiment_status":"not requested"}
+            pred=predict(h,sent["sentiment_score"]) if not h.empty else {"status":"NO_PRICE_HISTORY","message":"No provider history"}
+            rows.append({"company_name":r.company_name,"exchange":r.exchange,"ticker":r.ticker,"provider_symbol":s,**sent,**pred})
+        except Exception as e: rows.append({"company_name":r.company_name,"exchange":r.exchange,"ticker":r.ticker,"provider_symbol":s,"status":"FAILED","message":str(e)})
+        print(f"[{i}/{len(m)}] {r.company_name}: {rows[-1].get('status')}")
+    d=pd.DataFrame(rows); stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    d.to_csv(PRED/f"predictions_{stamp}.csv",index=False); d.to_csv(PRED/"predictions_latest.csv",index=False)
+    print(d.status.value_counts(dropna=False).to_string())
+if __name__=="__main__": main()

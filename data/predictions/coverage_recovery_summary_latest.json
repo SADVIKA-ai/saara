@@ -1,0 +1,19 @@
+{
+  "timestamp_utc": "2026-10-30T09:17:40.560261+00:00",
+  "master_listing_records": 126,
+  "original_primary_OK_records": 96,
+  "new_separately_labelled_recovered_records": 13,
+  "combined_supported_analysis_records": 109,
+  "target_more_than_110_met": false,
+  "initial_years_unchanged": 10,
+  "minimum_usable_rows_unchanged": 120,
+  "original_predictions_latest_sha256_unchanged": true,
+  "original_predictions_latest_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\predictions_latest.csv",
+  "backup_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\predictions_latest_before_coverage_recovery_20261030T091712Z.csv",
+  "attempts_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\coverage_recovery_attempts_latest.csv",
+  "recovered_predictions_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\predictions_recovered_separate_source_latest.csv",
+  "augmented_126_row_report": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\predictions_coverage_augmented_latest.csv",
+  "quality_audit_file": "C:\\Users\\lavet\\Downloads\\Equity flow\\stock_market_ai_india_cloud\\stockai_it_only_package\\StockAI_India_ML_Engineer_Package\\data\\predictions\\prediction_quality_audit_latest.csv",
+  "model_selected_only_if_walk_forward_beats_baseline_on_both_metrics": true,
+  "warning": "Coverage recovery is not proof of better future accuracy. Alternate-exchange analyses are explicitly labelled and do not replace the original listing's prediction."
+}

@@ -1,0 +1,3 @@
+symbol,status,mode,previous_rows,rows,new_dates,latest_date,history_quality,error,company_name,exchange,ticker
+3IINFOLTD.NS,REFRESHED_NO_NEW_DATES,INCREMENTAL,2476,2476,0,2026-10-30,ADEQUATE,,3i Infotech Limited,NSE,3IINFOLTD
+3IINFOLTD.BO,REFRESHED_NO_NEW_DATES,INCREMENTAL,2474,2474,0,2026-10-30,ADEQUATE,,3I INFOTECH LTD.,BSE,3IINFOLTD

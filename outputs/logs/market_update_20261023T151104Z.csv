@@ -1,0 +1,3 @@
+symbol,status,rows,latest_date,error,company_name,exchange
+3IINFO-RE.BO,FAILED,0,,Provider returned no rows,3i Infotech limited,BSE
+3IINFOLTD.NS,UPDATED,2471,2026-10-23,,3i Infotech Limited,NSE

@@ -1,0 +1,400 @@
+
+from datetime import datetime, timedelta
+import time
+
+import pandas as pd
+import yfinance as yf
+
+from .config import RAW, INITIAL_YEARS, MIN_ROWS
+
+
+def safe(symbol):
+    """Convert a provider symbol into a safe filename."""
+    return "".join(
+        char if char.isalnum() or char in "._-" else "_"
+        for char in str(symbol)
+    )
+
+
+def path(symbol):
+    """Return the raw CSV path for a provider symbol."""
+    return RAW / (safe(symbol) + ".csv")
+
+
+def trading_dates(values):
+    """Normalize timestamps to Indian trading dates."""
+    parsed = pd.to_datetime(
+        values,
+        errors="coerce",
+        format="mixed",
+        utc=True,
+    )
+
+    return (
+        parsed.dt.tz_convert("Asia/Kolkata")
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
+
+
+def read(symbol):
+    """Read existing market history without modifying the source file."""
+    if not symbol:
+        return pd.DataFrame()
+
+    file_path = path(symbol)
+
+    if not file_path.exists():
+        return pd.DataFrame()
+
+    try:
+        data = pd.read_csv(file_path)
+
+        if "Date" not in data.columns:
+            return pd.DataFrame()
+
+        data["Date"] = trading_dates(data["Date"])
+
+        data = (
+            data.dropna(subset=["Date"])
+            .drop_duplicates("Date", keep="last")
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+        return data
+
+    except (
+        OSError,
+        ValueError,
+        pd.errors.ParserError,
+        KeyError,
+    ):
+        return pd.DataFrame()
+
+
+def normalize(data):
+    """Normalize downloaded yfinance data into a consistent table."""
+    if data is None or data.empty:
+        return pd.DataFrame()
+
+    data = data.copy()
+
+    # Handle MultiIndex columns returned by some yfinance versions.
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = [
+            next(
+                (
+                    str(part)
+                    for part in column
+                    if str(part) not in ("", "None")
+                ),
+                str(column[0]),
+            )
+            for column in data.columns
+        ]
+
+    data = data.reset_index()
+
+    data.columns = [
+        str(column).strip().replace(" ", "_")
+        for column in data.columns
+    ]
+
+    if "Date" not in data.columns and "Datetime" in data.columns:
+        data = data.rename(columns={"Datetime": "Date"})
+
+    if "Date" not in data.columns:
+        return pd.DataFrame()
+
+    data["Date"] = trading_dates(data["Date"])
+
+    data = (
+        data.dropna(subset=["Date"])
+        .drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    return data
+
+
+def history_quality(row_count):
+    """Classify history coverage; this is not a forecast-quality score."""
+    if row_count <= 0:
+        return "UNAVAILABLE"
+
+    if row_count < MIN_ROWS:
+        return "SHORT_HISTORY"
+
+    return "ADEQUATE"
+
+
+def update(symbol, retries=3, force_backfill=False):
+    """
+    Update a symbol's historical data.
+
+    Default behavior:
+      - Missing file: request the configured historical backfill.
+      - Existing file: request overlapping recent dates and merge.
+      - force_backfill=True: explicitly request the configured backfill.
+
+    Existing history is preserved when the provider returns no data.
+    """
+
+    if not symbol:
+        return {
+            "symbol": symbol,
+            "status": "NO_SYMBOL",
+            "mode": "NONE",
+            "previous_rows": 0,
+            "rows": 0,
+            "latest_date": "",
+            "history_quality": "UNAVAILABLE",
+            "error": "No provider symbol",
+        }
+
+    old = read(symbol)
+    previous_rows = len(old)
+
+    now = datetime.now()
+    today = now.date()
+
+    needs_backfill = old.empty or force_backfill
+
+    if needs_backfill:
+        start = (
+            now - timedelta(days=365.25 * INITIAL_YEARS)
+        ).date()
+        mode = "BACKFILL"
+    else:
+        last_date = old["Date"].max()
+        start = (last_date - pd.Timedelta(days=5)).date()
+        mode = "INCREMENTAL"
+
+    end = (today + timedelta(days=1)).isoformat()
+
+    errors = []
+    fresh = pd.DataFrame()
+
+    attempts = max(1, int(retries))
+
+    for attempt in range(attempts):
+        try:
+            downloaded = yf.download(
+                symbol,
+                start=start.isoformat(),
+                end=end,
+                auto_adjust=False,
+                actions=True,
+                progress=False,
+                threads=False,
+                timeout=30,
+            )
+
+            fresh = normalize(downloaded)
+
+            if not fresh.empty:
+                break
+
+            errors.append("Provider returned no rows")
+
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+        if attempt + 1 < attempts:
+            time.sleep(attempt + 1)
+
+    # Do not overwrite existing data when the download is empty.
+    if fresh.empty:
+        latest = (
+            str(old["Date"].max().date())
+            if not old.empty
+            else ""
+        )
+
+        only_empty_responses = (
+            bool(errors)
+            and all(
+                error == "Provider returned no rows"
+                for error in errors
+            )
+        )
+
+        if not old.empty:
+            status = "NO_NEW_DATA"
+        elif only_empty_responses:
+            status = "NO_PROVIDER_HISTORY"
+        else:
+            status = "FAILED"
+
+        return {
+            "symbol": symbol,
+            "status": status,
+            "mode": mode,
+            "previous_rows": previous_rows,
+            "rows": previous_rows,
+            "latest_date": latest,
+            "history_quality": history_quality(previous_rows),
+            "error": "; ".join(errors),
+        }
+
+    # Merge old and new data without discarding older dates.
+    combined = pd.concat(
+        [old, fresh],
+        ignore_index=True,
+        sort=False,
+    )
+
+    combined["Date"] = trading_dates(combined["Date"])
+
+    combined = combined.dropna(subset=["Date"])
+
+    # Combine overlapping dates, keeping the last non-null value
+    # from the ordered records.
+    combined = (
+        combined.sort_values("Date")
+        .groupby("Date", as_index=False, sort=True)
+        .last()
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    # Restore old values when the provider's overlapping rows have
+    # missing fields. Do not replace fresh non-null values with old ones.
+    if not old.empty:
+        old_by_date = (
+            old.drop_duplicates("Date", keep="last")
+            .set_index("Date")
+        )
+
+        merged_by_date = combined.set_index("Date")
+        merged_by_date = merged_by_date.combine_first(old_by_date)
+
+        combined = (
+            merged_by_date.reset_index()
+            .sort_values("Date")
+            .reset_index(drop=True)
+        )
+
+    combined = (
+        combined.drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
+
+    # Validate the history before writing anything.
+    if combined.empty:
+        raise ValueError(
+            f"Refusing to save empty history for {symbol}"
+        )
+
+    if combined["Date"].isna().any():
+        raise ValueError(
+            f"Refusing to save invalid dates for {symbol}"
+        )
+
+    if combined["Date"].duplicated().any():
+        raise ValueError(
+            f"Refusing to save duplicate dates for {symbol}"
+        )
+
+    if not combined["Date"].is_monotonic_increasing:
+        raise ValueError(
+            f"Refusing to save unsorted dates for {symbol}"
+        )
+
+    # Validate downloaded price columns when they are available.
+    if "Close" in combined.columns:
+        close = pd.to_numeric(
+            combined["Close"],
+            errors="coerce",
+        )
+
+        invalid_close = close.notna() & (close <= 0)
+
+        if invalid_close.any():
+            raise ValueError(
+                f"Refusing to save non-positive closing prices for {symbol}"
+            )
+
+    destination = path(symbol)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary = destination.with_name(
+        destination.name + ".tmp"
+    )
+
+    try:
+        combined.to_csv(temporary, index=False)
+
+        # Re-read the temporary file before replacing the destination.
+        check = pd.read_csv(temporary)
+
+        if "Date" not in check.columns:
+            raise ValueError("Temporary CSV is missing Date")
+
+        if len(check) != len(combined):
+            raise ValueError("Temporary CSV row-count validation failed")
+
+        check_dates = trading_dates(check["Date"])
+
+        if check_dates.isna().any():
+            raise ValueError("Temporary CSV contains invalid dates")
+
+        if check_dates.duplicated().any():
+            raise ValueError("Temporary CSV contains duplicate dates")
+
+        # Replace the destination only after validation succeeds.
+        temporary.replace(destination)
+
+    except Exception:
+        if temporary.exists():
+            temporary.unlink()
+
+        raise
+
+    row_count = len(combined)
+    latest = str(combined["Date"].max().date())
+
+    # Distinguish new dates from a successful overlapping refresh.
+    old_dates = set(old["Date"]) if not old.empty else set()
+    fresh_dates = set(fresh["Date"])
+    added_dates = len(fresh_dates - old_dates)
+
+    if old.empty:
+        status = "UPDATED"
+    elif added_dates > 0:
+        status = "UPDATED"
+    else:
+        status = "REFRESHED_NO_NEW_DATES"
+
+    return {
+        "symbol": symbol,
+        "status": status,
+        "mode": mode,
+        "previous_rows": previous_rows,
+        "rows": row_count,
+        "new_dates": added_dates,
+        "latest_date": latest,
+        "history_quality": history_quality(row_count),
+        "error": "",
+    }
+
+
+def history(symbol, refresh=False):
+    """Return sorted historical data, optionally refreshing it first."""
+    if refresh:
+        update(symbol)
+
+    data = read(symbol)
+
+    if data.empty:
+        return data
+
+    return (
+        data.dropna(subset=["Date"])
+        .drop_duplicates("Date", keep="last")
+        .sort_values("Date")
+        .reset_index(drop=True)
+    )
