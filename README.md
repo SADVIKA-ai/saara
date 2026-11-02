@@ -1,3 +1,4 @@
+
 # StockAI India — ML Engineer Package
 
 This is a continuation package based on the supplied checkpoint excerpts and `top_100_india_companies.xlsx`. The supplied ZIP is **not** a complete export of the existing Drive project: it contains a checkpoint README and two excerpts, not the complete source tree, datasets, notebook cells, or model binaries. This package does not claim to have audited unseen files or integrated the legacy model.
@@ -35,3 +36,5 @@ The included workbook has 100 company metadata rows. To expand, place a validate
 
 ## Legacy model
 The checkpoint reports an existing direction model expecting 38 features while the newer feature output had 39 columns. This package intentionally does not load the old model. Resolve schema and training metadata from the full project before integrating it.
+# saara
+
